@@ -1,2 +1,5 @@
 venv/*
 .idea/*
+artifacts/*
+news_sample.csv
+*__pycache__*

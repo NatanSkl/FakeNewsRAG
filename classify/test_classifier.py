@@ -8,34 +8,32 @@ import os
 import pytest
 
 from .classifier import classify_article, classify_article_simple, ClassificationResult
-from common.llm_client import LocalLLM
+from common.llm_client import Llama, Mistral
+
+# Global LLM instance - easily switch between models
+# Change this to Mistral() to use Mistral instead of Llama
+llm = Llama()
 
 
 def test_llm_connection():
     """Test that the local LLM server is reachable and responding."""
-    base_url = os.getenv("LLM_BASE_URL", "http://127.0.0.1:8010/v1")
-    llm = LocalLLM(base_url=base_url, model=os.getenv("LLM_MODEL", "local-llama"))
-    
     try:
         response = llm.simple("Hello, respond with just 'OK'", max_tokens=5)
         assert isinstance(response, str)
         assert len(response.strip()) > 0
         print(f"LLM response: {response}")
     except Exception as e:
-        pytest.skip(f"Local LLM not reachable at {base_url}: {e}")
+        pytest.skip(f"Local LLM not reachable: {e}")
 
 
 @pytest.mark.integration
 def test_classify_fake_article():
     """Test classification of a clearly fake article."""
-    base_url = os.getenv("LLM_BASE_URL", "http://127.0.0.1:8010/v1")
-    llm = LocalLLM(base_url=base_url, model=os.getenv("LLM_MODEL", "local-llama"))
-    
     try:
         # Test LLM connection
         llm.simple("Test", max_tokens=3)
     except Exception as e:
-        pytest.skip(f"Local LLM not reachable at {base_url}: {e}")
+        pytest.skip(f"Local LLM not reachable: {e}")
     
     # Sample fake article
     article_title = "Scientists Discover That Vaccines Cause Autism"
@@ -76,7 +74,7 @@ def test_classify_fake_article():
     
     # Assertions
     assert isinstance(result, ClassificationResult)
-    assert result.prediction in ["fake", "reliable"]
+    assert result.prediction == "fake"
     assert 0.0 <= result.confidence <= 1.0
     assert isinstance(result.reasoning, str)
     assert len(result.reasoning) > 10
@@ -92,14 +90,11 @@ def test_classify_fake_article():
 @pytest.mark.integration
 def test_classify_reliable_article():
     """Test classification of a clearly reliable article."""
-    base_url = os.getenv("LLM_BASE_URL", "http://127.0.0.1:8010/v1")
-    llm = LocalLLM(base_url=base_url, model=os.getenv("LLM_MODEL", "local-llama"))
-    
     try:
         # Test LLM connection
         llm.simple("Test", max_tokens=3)
     except Exception as e:
-        pytest.skip(f"Local LLM not reachable at {base_url}: {e}")
+        pytest.skip(f"Local LLM not reachable: {e}")
     
     # Sample reliable article
     article_title = "New Study Confirms Climate Change is Human-Caused"
@@ -141,7 +136,7 @@ def test_classify_reliable_article():
     
     # Assertions
     assert isinstance(result, ClassificationResult)
-    assert result.prediction in ["fake", "reliable"]
+    assert result.prediction == "reliable"
     assert 0.0 <= result.confidence <= 1.0
     assert isinstance(result.reasoning, str)
     assert len(result.reasoning) > 10
@@ -156,14 +151,11 @@ def test_classify_reliable_article():
 @pytest.mark.integration
 def test_classify_ambiguous_article():
     """Test classification of an ambiguous article."""
-    base_url = os.getenv("LLM_BASE_URL", "http://127.0.0.1:8010/v1")
-    llm = LocalLLM(base_url=base_url, model=os.getenv("LLM_MODEL", "local-llama"))
-    
     try:
         # Test LLM connection
         llm.simple("Test", max_tokens=3)
     except Exception as e:
-        pytest.skip(f"Local LLM not reachable at {base_url}: {e}")
+        pytest.skip(f"Local LLM not reachable: {e}")
     
     # Sample ambiguous article
     article_title = "New Technology Promises to Revolutionize Energy Storage"

@@ -19,7 +19,11 @@ import pandas as pd
 import pytest
 
 from .summary import Article, EvidenceChunk, contrastive_summaries, _first_present
-from common.llm_client import LocalLLM
+from common.llm_client import Llama, Mistral
+
+# Global LLM instance - easily switch between models
+# Change this to Mistral() to use Mistral instead of Llama
+llm = Llama()
 
 # TOOD verify that summary module behaves correctly
 
@@ -151,12 +155,10 @@ def test_contrastive_summaries_real_llm_title_similarity():
     )
 
     # quick health check for the local llama server; skip if unavailable
-    base_url = os.getenv("LLM_BASE_URL", "http://127.0.0.1:8010/v1")
-    llm = LocalLLM(base_url=base_url, model=os.getenv("LLM_MODEL", "local-llama"))
     try:
         ping = llm.simple("Say OK.", system="You only say OK.", max_tokens=3)
     except Exception as e:
-        pytest.skip(f"Local LLM not reachable at {base_url}: {e}")
+        pytest.skip(f"Local LLM not reachable: {e}")
 
     # simple retrieval: pick top-k by title cosine similarity per label
     fake_idxs = top_k_similar(df, query_idx, title_col, label_col, k=3, type_filter="fake")
@@ -215,16 +217,13 @@ def test_contrastive_summaries_real_llm_title_similarity():
 
 def test_llm_connection():
     """Test that the local LLM server is reachable and responding."""
-    base_url = os.getenv("LLM_BASE_URL", "http://127.0.0.1:8010/v1")
-    llm = LocalLLM(base_url=base_url, model=os.getenv("LLM_MODEL", "local-llama"))
-    
     try:
         response = llm.simple("Hello, respond with just 'OK'", max_tokens=5)
         assert isinstance(response, str)
         assert len(response.strip()) > 0
         print(f"LLM response: {response}")
     except Exception as e:
-        pytest.skip(f"Local LLM not reachable at {base_url}: {e}")
+        pytest.skip(f"Local LLM not reachable: {e}")
 
 
 def test_summary_with_mock_data():
@@ -280,17 +279,13 @@ def test_summary_with_mock_data():
 def test_static_data_summary():
     """Test the contrastive summarization with static data using a real local LLM."""
     
-    # Initialize the local LLM client
-    base_url = os.getenv("LLM_BASE_URL", "http://127.0.0.1:8010/v1")
-    llm = LocalLLM(base_url=base_url, model=os.getenv("LLM_MODEL", "local-llama"))
-    
     # Test LLM connection first
     try:
         test_response = llm.simple("Hello, respond with just 'OK'", max_tokens=5)
         assert isinstance(test_response, str)
         assert len(test_response.strip()) > 0
     except Exception as e:
-        pytest.skip(f"Local LLM not reachable at {base_url}: {e}")
+        pytest.skip(f"Local LLM not reachable: {e}")
     
     # Create a sample query article
     query = Article(

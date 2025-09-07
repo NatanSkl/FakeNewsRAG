@@ -2,8 +2,9 @@
 Local LLM client for llama.cpp's OpenAI-compatible server.
 
 Usage example:
-    from generate.llm_client import LocalLLM
-    llm = LocalLLM(base_url="http://127.0.0.1:8010/v1", model="local-llama")
+    from common.llm_client import Llama, Mistral
+    llm = Llama()  # Uses default Llama configuration
+    mistral = Mistral()  # Uses default Mistral configuration
     resp = llm.chat([
         {"role": "system", "content": "You are concise."},
         {"role": "user", "content": "Say hi in 3 words."}
@@ -27,16 +28,7 @@ class ChatResponse:
 
 
 class LocalLLM:
-    """Thin wrapper over llama_cpp.server exposing an OpenAI-like chat() API.
-
-    Assumptions:
-    - You launched the server with:
-        python -m llama_cpp.server \
-          --model ./models/llama32-3b/Llama-3.2-3B-Instruct-Q4_K_M.gguf \
-          --n_gpu_layers -1 --n_ctx 2048 --n_batch 256 --offload_kqv true \
-          --host 127.0.0.1 --port 8010
-    - llama.cpp server is OpenAI-compatible at /v1/chat/completions.
-    """
+    """Base class for local LLM clients using llama.cpp server."""
 
     def __init__(
         self,
@@ -108,4 +100,54 @@ class LocalLLM:
         return self.chat(msgs, **kw).text
 
 
-__all__ = ["LocalLLM", "ChatResponse"]
+class Llama(LocalLLM):
+    """Llama model client with default configuration.
+    
+    Assumes Llama server is running with:
+        python -m llama_cpp.server \
+          --model ./models/llama32-3b/Llama-3.2-3B-Instruct-Q4_K_M.gguf \
+          --n_gpu_layers -1 --n_ctx 2048 --n_batch 256 --offload_kqv true \
+          --host 127.0.0.1 --port 8010
+    """
+    
+    def __init__(
+        self,
+        base_url: str | None = None,
+        model: str | None = None,
+        api_key: str | None = None,
+        timeout: int = 120,
+    ) -> None:
+        super().__init__(
+            base_url=base_url or os.getenv("LLAMA_BASE_URL", "http://127.0.0.1:8010/v1"),
+            model=model or os.getenv("LLAMA_MODEL", "llama-3.2-3b"),
+            api_key=api_key,
+            timeout=timeout
+        )
+
+
+class Mistral(LocalLLM):
+    """Mistral model client with default configuration.
+    
+    Assumes Mistral server is running with:
+        python -m llama_cpp.server \
+          --model ./models/mistral-7b-instruct/mistral-7b-instruct-v0.2.Q4_K_M.gguf \
+          --n_gpu_layers -1 --n_ctx 2048 --n_batch 256 --offload_kqv true \
+          --host 127.0.0.1 --port 8011
+    """
+    
+    def __init__(
+        self,
+        base_url: str | None = None,
+        model: str | None = None,
+        api_key: str | None = None,
+        timeout: int = 120,
+    ) -> None:
+        super().__init__(
+            base_url=base_url or os.getenv("MISTRAL_BASE_URL", "http://127.0.0.1:8011/v1"),
+            model=model or os.getenv("MISTRAL_MODEL", "mistral-7b-instruct"),
+            api_key=api_key,
+            timeout=timeout
+        )
+
+
+__all__ = ["LocalLLM", "Llama", "Mistral", "ChatResponse"]

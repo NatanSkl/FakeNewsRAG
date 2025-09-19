@@ -1,0 +1,533 @@
+from __future__ import annotations
+from generate.summary import Article, EvidenceChunk, contrastive_summaries
+from classify.classifier import classify_article, ClassificationResult
+from common.llm_client import Llama, Mistral, LocalLLM
+
+import numpy as np
+import faiss
+import json
+import re
+import pickle
+import math
+import datetime as dt
+from collections import defaultdict
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import List, Dict, Any, Tuple
+from sentence_transformers import SentenceTransformer, CrossEncoder
+from rank_bm25 import BM25Okapi
+
+
+
+
+
+#retrieval helpers
+
+def rrf(rank: int, k: int = 60) -> float:  # Reciprocal Rank Fusion
+    return 1.0 / (k + rank)
+
+
+def mmr(query_vec: np.ndarray,
+        doc_vecs: np.ndarray,
+        candidates: List[int],
+        lam: float = 0.4,
+        k: int = 120) -> List[int]:
+    """Maximal Marginal Relevance (cosine with normalized vectors)."""
+    sel: List[int] = []
+    cand = candidates.copy()
+    q = query_vec / (np.linalg.norm(query_vec) + 1e-9)
+    # doc_vecs assumed normalized
+    while cand and len(sel) < k:
+        best_i, best_s = None, -1e9
+        for i in cand:
+            rel = float(np.dot(q, doc_vecs[i]))
+            div = 0.0 if not sel else max(float(np.dot(doc_vecs[i], doc_vecs[j])) for j in sel)
+            s = lam * rel - (1.0 - lam) * div
+            if s > best_s:
+                best_s, best_i = s, i
+        sel.append(best_i)  # type: ignore[arg-type]
+        cand.remove(best_i)  # type: ignore[arg-type]
+    return sel
+
+
+def claimify(text: str, emb_model: SentenceTransformer, max_sents: int = 6) -> str:
+    sents = re.split(r'(?<=[.!?])\s+', text or "")
+    sents = [s.strip() for s in sents if s.strip()]
+    if not sents:
+        return (text or "").strip()
+    vecs = emb_model.encode(sents, normalize_embeddings=True).astype("float32")
+    centroid = vecs.mean(axis=0, keepdims=True)
+    sims = (vecs @ centroid.T).ravel()
+    idx = sorted(np.argsort(-sims)[:max_sents])  # keep original order
+    return " ".join([sents[i] for i in idx])
+
+
+def make_mqe_variants(article_text: str,
+                      title_hint: str | None,
+                      emb_model: SentenceTransformer) -> List[str]:
+    base = (article_text or "").strip()
+    if not base:
+        return []
+    variants: List[str] = []
+    # v1: claim-focused
+    variants.append(claimify(base, emb_model))
+    # v2: lead sentences
+    sents = re.split(r'(?<=[.!?])\s+', base)
+    variants.append(" ".join(sents[:3]))
+    # v3: title-boosted
+    if title_hint:
+        variants.append((title_hint.strip() + " ") * 3 + variants[0])
+    # dedupe & length
+    out, seen = [], set()
+    for v in variants:
+        v2 = v.strip()
+        if len(v2) >= 40 and v2 not in seen:
+            out.append(v2)
+            seen.add(v2)
+    return out[:3]
+
+
+@dataclass
+class Store:
+    emb: SentenceTransformer
+    index: Any
+    bm25: BM25Okapi
+    chunks: List[Dict[str, Any]]
+    meta: Dict[str, Any]
+
+
+def load_store(store_dir: str = "mini_index/store") -> Store:
+    out = Path(store_dir)
+    if not out.exists():
+        raise FileNotFoundError(f"Index store not found: {store_dir}")
+    meta = json.loads((out / "meta.json").read_text(encoding="utf-8"))
+    with open(out / "bm25.pkl", "rb") as f:
+        obj = pickle.load(f)
+    bm25: BM25Okapi = obj["bm25"]
+    chunks: List[Dict[str, Any]] = obj["chunks_meta"]
+    index = faiss.read_index(str(out / "faiss.index"))
+    emb = SentenceTransformer(meta["embedding_model"])
+    return Store(emb=emb, index=index, bm25=bm25, chunks=chunks, meta=meta)
+
+
+def encode(emb: SentenceTransformer, text: str) -> np.ndarray:
+    v = emb.encode([text], normalize_embeddings=True)
+    return v.astype("float32")
+
+
+#retrieval config
+
+@dataclass
+class RetrievalConfig:
+    k_dense: int = 600
+    k_bm25: int = 600
+    w_dense: float = 1.35
+    w_lex: float = 1.0
+    mmr_k: int = 180
+    mmr_lambda: float = 0.45
+    topn: int = 24
+    topn_per_label: int = 12
+    domain_cap: int = 2
+
+    # lost-in-the-middle: sentence re-scoring
+    sent_maxpool: bool = True
+    sent_max_sents: int = 12          # max sentences to score per chunk
+    sent_min_len: int = 20            # skip tiny sentences
+    sent_bonus: float = 0.25          # how much to mix into the fused score
+
+    # cross-encoder reranking
+    use_cross_encoder: bool = True
+    cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    ce_topk: int = 40                 # rerank only the final top-K after MMR
+    ce_weight: float = 1.0            # linear mix with fused score
+
+    # xQuAD diversification
+    use_xquad: bool = True
+    xquad_k: int = 16                 # how many to select with xQuAD
+    xquad_lambda: float = 0.6
+    xquad_aspects: int = 3            # #sub-queries from MQE variants
+
+    # metadata filters
+    label_filter: str | None = None
+    date_from: str | None = None
+    date_to: str | None = None
+    lang_whitelist: set[str] = field(default_factory=set)
+    domain_whitelist: set[str] = field(default_factory=set)
+    domain_blacklist: set[str] = field(default_factory=set)
+    min_source_score: float | None = None
+    min_chunk_chars: int = 200
+
+
+def _parse_date(s: str | None) -> dt.date | None:
+    if not s:
+        return None
+    return dt.date.fromisoformat(s)
+
+
+def filter_by_metadata(hits: List[Dict[str, Any]], cfg: RetrievalConfig) -> List[Dict[str, Any]]:
+    d_from = _parse_date(cfg.date_from)
+    d_to = _parse_date(cfg.date_to)
+
+    out: List[Dict[str, Any]] = []
+    for h in hits:
+        if cfg.label_filter and h.get("label") != cfg.label_filter:
+            continue
+        if len(h.get("chunk_text", "")) < cfg.min_chunk_chars:
+            continue
+
+        pd_s = h.get("published_date")
+        if pd_s and (d_from or d_to):
+            try:
+                pd = dt.date.fromisoformat(pd_s[:10])
+                if d_from and pd < d_from:
+                    continue
+                if d_to and pd > d_to:
+                    continue
+            except Exception:
+                pass
+
+        lang = (h.get("language") or "").lower()
+        dom = (h.get("source_domain") or "").lower()
+
+        if cfg.lang_whitelist and lang not in cfg.lang_whitelist:
+            continue
+        if cfg.domain_whitelist and dom not in cfg.domain_whitelist:
+            continue
+        if cfg.domain_blacklist and dom in cfg.domain_blacklist:
+            continue
+
+        if cfg.min_source_score is not None:
+            if float(h.get("source_score", 1.0)) < cfg.min_source_score:
+                continue
+
+        out.append(h)
+    return out
+
+
+def sentence_maxpool_boost(store: Store,
+                           qv: np.ndarray,
+                           hits: List[Dict[str, Any]],
+                           cfg: RetrievalConfig) -> List[Dict[str, Any]]:
+    """Mitigate 'lost in the middle' by scoring sentences and max-pooling."""
+    if not cfg.sent_maxpool or not hits:
+        return hits
+
+    qv_norm = qv / (np.linalg.norm(qv) + 1e-9)
+    for h in hits:
+        text = h.get("chunk_text", "")
+        sents = re.split(r'(?<=[.!?])\s+', text)
+        sents = [s.strip() for s in sents if len(s.strip()) >= cfg.sent_min_len][:cfg.sent_max_sents]
+        if not sents:
+            h["_sent_max"] = 0.0
+            continue
+
+        sv = store.emb.encode(sents, normalize_embeddings=True).astype("float32")
+        sims = (sv @ qv_norm).ravel()
+        h["_sent_max"] = float(np.max(sims)) if sims.size else 0.0
+
+    # min-max normalize sentence scores and blend
+    mvals = [h.get("_sent_max", 0.0) for h in hits]
+    if mvals:
+        lo, hi = min(mvals), max(mvals)
+        rng = (hi - lo) or 1e-6
+        for h in hits:
+            z = (h.get("_sent_max", 0.0) - lo) / rng
+            h["_score"] = h.get("_score", h.get("rrf", 0.0)) + cfg.sent_bonus * z
+    return hits
+
+
+def xquad_diversify(store: Store,
+                    qv: np.ndarray,
+                    hits: List[Dict[str, Any]],
+                    aspects: List[np.ndarray],
+                    cfg: RetrievalConfig) -> List[Dict[str, Any]]:
+    """Simple xQuAD: trade-off between relevance to aspects and novelty wrt selected set."""
+    if not cfg.use_xquad or not hits:
+        return hits
+
+    dvs = store.emb.encode([h["chunk_text"] for h in hits],
+                           normalize_embeddings=True).astype("float32")
+    selected: List[int] = []
+    remaining: List[int] = list(range(len(hits)))
+    qn = qv / (np.linalg.norm(qv) + 1e-9)
+
+    while remaining and len(selected) < min(cfg.xquad_k, len(hits)):
+        best_i, best_val = None, -1e9
+        for i in remaining:
+            rel = float(dvs[i] @ qn)
+            cov = 0.0
+            for a in aspects:
+                an = a / (np.linalg.norm(a) + 1e-9)
+                cov += float(dvs[i] @ an)
+            cov /= max(len(aspects), 1)
+            nov = 0.0 if not selected else max(float(dvs[i] @ dvs[j]) for j in selected)
+            score = cfg.xquad_lambda * (rel + cov) - (1.0 - cfg.xquad_lambda) * nov
+            if score > best_val:
+                best_val, best_i = score, i
+        selected.append(best_i)
+        remaining.remove(best_i)
+
+    sel_hits = [hits[i] for i in selected]
+    return sel_hits
+
+
+def cross_encoder_rerank(cross_enc: CrossEncoder,
+                         query_text: str,
+                         hits: List[Dict[str, Any]],
+                         cfg: RetrievalConfig) -> List[Dict[str, Any]]:
+    if not cfg.use_cross_encoder or not hits:
+        return hits
+
+    subset = hits[:cfg.ce_topk]
+    pairs = [(query_text, h.get("chunk_text", "")) for h in subset]
+    try:
+        ce_scores = cross_enc.predict(pairs).tolist()
+    except Exception:
+        # be robust if model missing
+        return hits
+
+    # min-max normalize CE scores and blend
+    lo, hi = min(ce_scores), max(ce_scores)
+    rng = (hi - lo) or 1e-6
+    for h, s in zip(subset, ce_scores):
+        z = (s - lo) / rng
+        base = h.get("_score", h.get("rrf", 0.0))
+        h["_score"] = base + cfg.ce_weight * z
+
+    head_sorted = sorted(subset, key=lambda h: h.get("_score", h.get("rrf", 0.0)), reverse=True)
+    tail = hits[cfg.ce_topk:]
+    return head_sorted + tail
+
+
+def hybrid_once(store: Store,
+                query_text: str,
+                cfg: RetrievalConfig,
+                *,
+                label_filter: str | None) -> Tuple[List[Dict[str, Any]], np.ndarray]:
+    # Dense
+    qv = encode(store.emb, query_text)
+    _, I = store.index.search(qv, cfg.k_dense)
+    dense_ids = I[0].tolist()
+
+    # BM25
+    q_tokens = re.findall(r"\w+", query_text.lower())
+    try:
+        scores_bm = store.bm25.get_scores(q_tokens)
+    except Exception:
+        tokenized = [re.findall(r"\w+", m["chunk_text"].lower()) for m in store.chunks]
+        store.bm25 = BM25Okapi(tokenized)
+        scores_bm = store.bm25.get_scores(q_tokens)
+    bm_top = np.argsort(-scores_bm)[:cfg.k_bm25].tolist()
+
+    # Weighted RRF (dense + lex)
+    fused: Dict[int, float] = defaultdict(float)
+    for r, idx in enumerate(dense_ids, 1):
+        fused[idx] += cfg.w_dense * rrf(r)
+    for r, idx in enumerate(bm_top, 1):
+        fused[idx] += cfg.w_lex * rrf(r)
+
+    cand = sorted(fused.keys(), key=lambda i: fused[i], reverse=True)
+
+    # label pre-filter
+    if label_filter:
+        cand = [i for i in cand if store.chunks[i]["label"] == label_filter]
+
+    # Diversity (MMR) on the candidates
+    texts = [store.chunks[i]["chunk_text"] for i in cand]
+    if texts:
+        doc_vecs = store.emb.encode(texts, normalize_embeddings=True).astype("float32")
+    else:
+        doc_vecs = np.zeros((0, qv.shape[-1]), dtype="float32")
+
+    loc2glob = {li: gi for li, gi in enumerate(cand)}
+    sel_local = mmr(qv[0], doc_vecs, list(range(len(cand))),
+                    lam=cfg.mmr_lambda, k=min(cfg.mmr_k, len(cand)))
+    sel_global = [loc2glob[i] for i in sel_local]
+
+    hits: List[Dict[str, Any]] = []
+    for gi in sel_global:
+        h = store.chunks[gi].copy()
+        h["rrf"] = fused[gi]
+        h["_score"] = fused[gi]
+        hits.append(h)
+
+    return hits, qv[0]
+
+
+def apply_domain_cap(hits: List[Dict[str, Any]], cap: int = 2) -> List[Dict[str, Any]]:
+    if cap <= 0:
+        return hits
+    out: List[Dict[str, Any]] = []
+    seen: Dict[str, int] = {}
+    for h in hits:
+        d = (h.get("source_domain") or "").lower()
+        seen[d] = seen.get(d, 0) + 1
+        if seen[d] <= cap:
+            out.append(h)
+    return out
+
+
+def retrieve_evidence(store: Store,
+                      article_text: str,
+                      title_hint: str | None,
+                      *,
+                      label_name: str,
+                      cfg: RetrievalConfig) -> List[Dict[str, Any]]:
+    # multi-query expansion
+    variants = make_mqe_variants(article_text, title_hint, store.emb)
+    if not variants:
+        return []
+
+    pooled: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    fuse_scores: Dict[Tuple[str, str], float] = defaultdict(float)
+
+    for v in variants:
+        hits, qv = hybrid_once(store, v, cfg, label_filter=label_name)
+        hits = sentence_maxpool_boost(store, qv, hits, cfg)
+
+        for r, h in enumerate(hits, 1):
+            key = (h["doc_id"], h["chunk_id"])
+            fuse_scores[key] += rrf(r)
+            if key not in pooled:
+                pooled[key] = h
+            else:
+                pooled[key]["_score"] = max(
+                    pooled[key].get("_score", 0.0),
+                    h.get("_score", 0.0)
+                )
+
+    merged = [pooled[k] for k in sorted(fuse_scores, key=fuse_scores.get, reverse=True)]
+
+    cfg_local = dataclass_replace(cfg, label_filter=label_name)
+    merged = filter_by_metadata(merged, cfg_local)
+    merged = apply_domain_cap(merged, cap=cfg.domain_cap)
+
+    if cfg.use_xquad and merged:
+        aspects_text = variants[:cfg.xquad_aspects]
+        aspects_vecs = store.emb.encode(aspects_text, normalize_embeddings=True).astype("float32")
+        merged = xquad_diversify(store, encode(store.emb, article_text)[0], merged, list(aspects_vecs), cfg)
+
+    if cfg.use_cross_encoder and merged:
+        try:
+            ce = CrossEncoder(cfg.cross_encoder_model)
+            merged = cross_encoder_rerank(ce, article_text, merged, cfg)
+        except Exception:
+            pass
+
+
+    return merged[:cfg.topn]
+
+
+def dataclass_replace(cfg: RetrievalConfig, **kw) -> RetrievalConfig:
+    """Shallow clone with overrides (like dataclasses.replace but explicit to avoid import)."""
+    d = cfg.__dict__.copy()
+    d.update(kw)
+    return RetrievalConfig(**d)
+
+
+
+def to_evidence_chunks(hits: List[Dict[str, Any]],
+                       target_label_for_summary: str) -> List[EvidenceChunk]:
+    """
+    Map index labels to EvidenceChunk labels expected by the generation module.
+    Index uses: 'fake' | 'credible' | 'other'
+    Summaries expect: 'fake' | 'reliable'
+    """
+    mapped: List[EvidenceChunk] = []
+    for h in hits:
+        lab = h.get("label", "")
+        if lab == "fake":
+            l2 = "fake"
+        elif lab == "credible":
+            l2 = "reliable"
+        else:
+            continue
+        if l2 != target_label_for_summary:
+            continue
+        mapped.append(EvidenceChunk(
+            id=f"{h['doc_id']}:{h['chunk_id']}",
+            title=h.get("title", ""),
+            text=h.get("chunk_text", ""),
+            label=l2,
+        ))
+    return mapped
+
+
+@dataclass
+class RAGOutput:
+    classification: ClassificationResult
+    fake_summary: str
+    reliable_summary: str
+    fake_evidence: List[EvidenceChunk]
+    reliable_evidence: List[EvidenceChunk]
+
+
+def classify_article_rag(
+    article_title: str,
+    article_content: str,
+    store_dir: str = "mini_index/store",
+    llm: LocalLLM | None = None,
+    title_hint: str | None = None,
+    topn_per_label: int = 12,
+) -> RAGOutput:
+    """
+    Full pipeline:
+      retrieval (fake & credible) -> two summaries -> classifier -> result
+    """
+    store = load_store(store_dir)
+
+    # configure retrieval
+    rcfg = RetrievalConfig(
+        topn_per_label=topn_per_label,
+        label_filter=None,
+        date_from=None, date_to=None,
+        lang_whitelist=set(),
+        domain_whitelist=set(),
+        domain_blacklist=set(),
+        min_source_score=None,
+    )
+
+
+    fake_hits = retrieve_evidence(
+        store, article_content, title_hint,
+        label_name="fake", cfg=rcfg
+    )
+    credible_hits = retrieve_evidence(
+        store, article_content, title_hint,
+        label_name="credible", cfg=rcfg
+    )
+
+    ev_fake = to_evidence_chunks(fake_hits, "fake")
+    ev_reliable = to_evidence_chunks(credible_hits, "reliable")
+    llm = llm or Llama()
+
+
+    summaries = contrastive_summaries(
+        llm=llm,
+        query=Article(id="query", title=article_title or "(untitled)", text=article_content or ""),
+        fake_evidence=ev_fake,
+        reliable_evidence=ev_reliable,
+        temperature=0.2,
+        max_tokens=500,
+    )
+    fake_summary = summaries["fake_summary"]
+    reliable_summary = summaries["reliable_summary"]
+
+
+    cls = classify_article(
+        llm=llm,
+        article_title=article_title or "(untitled)",
+        article_content=article_content or "",
+        fake_summary=fake_summary,
+        reliable_summary=reliable_summary,
+        temperature=0.1,
+        max_tokens=300,
+    )
+
+    return RAGOutput(
+        classification=cls,
+        fake_summary=fake_summary,
+        reliable_summary=reliable_summary,
+        fake_evidence=ev_fake,
+        reliable_evidence=ev_reliable,
+    )

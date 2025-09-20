@@ -4,6 +4,7 @@ import streamlit as st
 
 from rag_pipeline import classify_article_rag, RAGOutput
 from common.llm_client import Llama, Mistral
+#python -m streamlit run app.py
 
 st.set_page_config(page_title="FakeNews RAG — Real vs Fake", layout="wide")
 st.title("📰 FakeNews RAG")

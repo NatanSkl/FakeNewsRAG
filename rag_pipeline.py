@@ -58,7 +58,7 @@ def claimify(text: str, emb_model: SentenceTransformer, max_sents: int = 6) -> s
     vecs = emb_model.encode(sents, normalize_embeddings=True).astype("float32")
     centroid = vecs.mean(axis=0, keepdims=True)
     sims = (vecs @ centroid.T).ravel()
-    idx = sorted(np.argsort(-sims)[:max_sents])  # keep original order
+    idx = sorted(np.argsort(-sims)[:max_sents])
     return " ".join([sents[i] for i in idx])
 
 

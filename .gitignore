@@ -3,3 +3,5 @@ venv/*
 artifacts/*
 news_sample.csv
 *__pycache__*
+news_parts/
+index/store/

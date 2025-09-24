@@ -1,7 +1,8 @@
-from __future__ import annotations
-from generate.summary import Article, EvidenceChunk, contrastive_summaries
-from classify.classifier import classify_article, ClassificationResult
-from common.llm_client import Llama, Mistral, LocalLLM
+"""
+Core retrieval functions for the FakeNewsRAG system.
+
+This module contains the fundamental retrieval algorithms and data structures.
+"""
 
 import numpy as np
 import faiss
@@ -18,10 +19,7 @@ from sentence_transformers import SentenceTransformer, CrossEncoder
 from rank_bm25 import BM25Okapi
 
 
-
-
-
-#retrieval helpers
+# Retrieval helpers
 
 def rrf(rank: int, k: int = 60) -> float:  # Reciprocal Rank Fusion
     return 1.0 / (k + rank)
@@ -115,7 +113,7 @@ def encode(emb: SentenceTransformer, text: str) -> np.ndarray:
     return v.astype("float32")
 
 
-#retrieval config
+# Retrieval config
 
 @dataclass
 class RetrievalConfig:
@@ -414,7 +412,6 @@ def retrieve_evidence(store: Store,
         except Exception:
             pass
 
-
     return merged[:cfg.topn]
 
 
@@ -423,111 +420,3 @@ def dataclass_replace(cfg: RetrievalConfig, **kw) -> RetrievalConfig:
     d = cfg.__dict__.copy()
     d.update(kw)
     return RetrievalConfig(**d)
-
-
-
-def to_evidence_chunks(hits: List[Dict[str, Any]],
-                       target_label_for_summary: str) -> List[EvidenceChunk]:
-    """
-    Map index labels to EvidenceChunk labels expected by the generation module.
-    Index uses: 'fake' | 'credible' | 'other'
-    Summaries expect: 'fake' | 'reliable'
-    """
-    mapped: List[EvidenceChunk] = []
-    for h in hits:
-        lab = h.get("label", "")
-        if lab == "fake":
-            l2 = "fake"
-        elif lab == "credible":
-            l2 = "reliable"
-        else:
-            continue
-        if l2 != target_label_for_summary:
-            continue
-        mapped.append(EvidenceChunk(
-            id=f"{h['doc_id']}:{h['chunk_id']}",
-            title=h.get("title", ""),
-            text=h.get("chunk_text", ""),
-            label=l2,
-        ))
-    return mapped
-
-
-@dataclass
-class RAGOutput:
-    classification: ClassificationResult
-    fake_summary: str
-    reliable_summary: str
-    fake_evidence: List[EvidenceChunk]
-    reliable_evidence: List[EvidenceChunk]
-
-
-def classify_article_rag(
-    article_title: str,
-    article_content: str,
-    store_dir: str = "mini_index/store",
-    llm: LocalLLM | None = None,
-    title_hint: str | None = None,
-    topn_per_label: int = 12,
-) -> RAGOutput:
-    """
-    Full pipeline:
-      retrieval (fake & credible) -> two summaries -> classifier -> result
-    """
-    store = load_store(store_dir)
-
-    # configure retrieval
-    rcfg = RetrievalConfig(
-        topn_per_label=topn_per_label,
-        label_filter=None,
-        date_from=None, date_to=None,
-        lang_whitelist=set(),
-        domain_whitelist=set(),
-        domain_blacklist=set(),
-        min_source_score=None,
-    )
-
-
-    fake_hits = retrieve_evidence(
-        store, article_content, title_hint,
-        label_name="fake", cfg=rcfg
-    )
-    credible_hits = retrieve_evidence(
-        store, article_content, title_hint,
-        label_name="credible", cfg=rcfg
-    )
-
-    ev_fake = to_evidence_chunks(fake_hits, "fake")
-    ev_reliable = to_evidence_chunks(credible_hits, "reliable")
-    llm = llm or Llama()
-
-
-    summaries = contrastive_summaries(
-        llm=llm,
-        query=Article(id="query", title=article_title or "(untitled)", text=article_content or ""),
-        fake_evidence=ev_fake,
-        reliable_evidence=ev_reliable,
-        temperature=0.2,
-        max_tokens=500,
-    )
-    fake_summary = summaries["fake_summary"]
-    reliable_summary = summaries["reliable_summary"]
-
-
-    cls = classify_article(
-        llm=llm,
-        article_title=article_title or "(untitled)",
-        article_content=article_content or "",
-        fake_summary=fake_summary,
-        reliable_summary=reliable_summary,
-        temperature=0.1,
-        max_tokens=300,
-    )
-
-    return RAGOutput(
-        classification=cls,
-        fake_summary=fake_summary,
-        reliable_summary=reliable_summary,
-        fake_evidence=ev_fake,
-        reliable_evidence=ev_reliable,
-    )

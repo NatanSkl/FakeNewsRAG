@@ -3,6 +3,7 @@
 # Production script to build FAISS index for the full 30GB news dataset
 # This script is designed to handle the large dataset without crashing your laptop
 
+echo "Run from Project root directory"
 echo "=== Building Full News Index ==="
 echo "This will process the full 30GB news dataset"
 echo "Estimated time: Several hours"
@@ -31,9 +32,9 @@ echo "  - Overlap: 120 tokens"
 echo ""
 
 # Run the optimized index builder
-python build_news_index_optimized.py \
-    --input ../news_parts/news_cleaned_2018_02_13.csv \
-    --outdir ../index/store \
+python index/create/build_news_index_optimized.py \
+    --input news_parts/news_cleaned_2018_02_13.csv \
+    --outdir index/store_full \
     --chunk-size 200 \
     --chunk-tokens 700 \
     --overlap-tokens 120 \

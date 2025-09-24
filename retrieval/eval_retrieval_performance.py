@@ -3,8 +3,9 @@ import random
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 import numpy as np
+from tqdm import tqdm
 
-from rag_pipeline import load_store, RetrievalConfig, claimify, retrieve_evidence
+from retrieval import load_store, RetrievalConfig, claimify, retrieve_evidence
 
 def keymap(chunks: List[Dict[str, Any]]) -> Dict[Tuple[str,int], int]:
     m = {}
@@ -61,7 +62,7 @@ def retrieve_global_ids(store, query_text: str, label: str, cfg: RetrievalConfig
 
 if __name__ == "__main__":
     random.seed(42)
-    store = load_store("mini_index/store")
+    store = load_store("../index/store")
     kmap = keymap(store.chunks)
 
     # FAST config: first-stage only
@@ -82,7 +83,7 @@ if __name__ == "__main__":
 
     R10 = M10 = N10 = 0.0
     n = 0
-    for qi in q_ids:
+    for qi in tqdm(q_ids):
         qchunk = store.chunks[qi]
         qtext = claimify(qchunk["chunk_text"], store.emb)
         qlabel = qchunk.get("label") or "credible"

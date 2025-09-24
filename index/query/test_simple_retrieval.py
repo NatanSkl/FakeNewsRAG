@@ -7,7 +7,7 @@ import argparse
 import sys
 from pathlib import Path
 sys.path.append('../..')
-from rag_pipeline import load_store, hybrid_once, RetrievalConfig
+from retrieval import load_store, hybrid_once, RetrievalConfig
 
 def test_simple_retrieval(store_dir: str):
     """Test simple hybrid retrieval"""

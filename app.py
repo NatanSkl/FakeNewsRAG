@@ -6,8 +6,8 @@ from pipeline import classify_article_rag, RAGOutput
 from common.llm_client import Llama, Mistral
 #python -m streamlit run app.py
 
-# TODO add query functions to index/query
 # TODO test retrieval code
+# TODO create eylon's index on a mini version of the dataset
 
 st.set_page_config(page_title="FakeNews RAG — Real vs Fake", layout="wide")
 st.title("📰 FakeNews RAG")

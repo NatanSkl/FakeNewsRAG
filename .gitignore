@@ -4,6 +4,7 @@ artifacts/*
 news_sample.csv
 *__pycache__*
 news_parts/
-index/store/
-index/store_full/
+index_tmp/store/
+index_tmp/store_full/
 *.md
+index/data/

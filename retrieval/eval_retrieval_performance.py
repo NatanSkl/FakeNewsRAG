@@ -62,7 +62,7 @@ def retrieve_global_ids(store, query_text: str, label: str, cfg: RetrievalConfig
 
 if __name__ == "__main__":
     random.seed(42)
-    store = load_store("../index/store")
+    store = load_store("../index_tmp/store")
     kmap = keymap(store.chunks)
 
     # FAST config: first-stage only

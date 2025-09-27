@@ -19,9 +19,11 @@ while True:
         import pandas as pd
         from tqdm import tqdm
         from sentence_transformers import SentenceTransformer
+        from sklearn.model_selection import train_test_split
+
     except ImportError:
         os.system(
-            "pip install faiss-cpu tiktoken sentence-transformers pandas numpy tqdm"
+            "pip install faiss-cpu tiktoken sentence-transformers pandas numpy tqdm scikit-learn"
         )
         # TODO: Switch to gpu
         # TODO: handle import errors when package already installed, avoid infinite loops
@@ -36,7 +38,7 @@ def parse_args() -> argparse.Namespace:
     # TODO: add help to all arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
-    parser.add_argument("--outdir", default="index/store")
+    parser.add_argument("--outdir", default="data")
     parser.add_argument("--model", default="Qwen/Qwen3-Embedding-8B")
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--normalize", action="store_true")
@@ -159,6 +161,7 @@ def main() -> None:
 
     df = load_dataframe(args.input, limit=args.limit)
     validate_columns(df, COLUMNS)
+    #TODO: train-test-validate split, create index for train set only
 
     encoding = tiktoken.get_encoding(args.encoding)
     rows = []

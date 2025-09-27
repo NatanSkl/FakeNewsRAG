@@ -8,6 +8,7 @@ from .retrieval import (
     load_store,
     encode,
     hybrid_once,
+    claimify,
     retrieve_evidence,
     RetrievalConfig,
     Store
@@ -17,6 +18,7 @@ __all__ = [
     'load_store',
     'encode', 
     'hybrid_once',
+    'claimify',
     'retrieve_evidence',
     'RetrievalConfig',
     'Store'

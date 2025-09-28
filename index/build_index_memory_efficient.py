@@ -1,5 +1,8 @@
 import os
 import argparse
+import json
+import pickle
+import re
 from typing import List
 import gc
 
@@ -226,6 +229,7 @@ def main() -> None:
     index = None
     dimension = None
     total_chunks = 0
+    all_chunks = []  # Store all chunks metadata
     
     # Process data in batches to control memory usage
     for start_idx in tqdm(range(0, len(df), args.processing_batch_size), 
@@ -251,10 +255,13 @@ def main() -> None:
         index.add(embeddings)
         total_chunks += len(rows)
         
+        # Store chunks metadata
+        all_chunks.extend(rows)
+        
         print(f"Added {len(rows)} chunks to index (total: {total_chunks})")
         
         # Clear memory
-        del rows, embeddings
+        del embeddings
         gc.collect()
     
     if index is None or total_chunks == 0:
@@ -262,7 +269,41 @@ def main() -> None:
     
     print(f"Index built with {total_chunks} chunks")
     save_index(index, args.outdir)
+    
+    # Save chunks metadata
+    chunks_file = os.path.join(args.outdir, "chunks.jsonl")
+    with open(chunks_file, "w", encoding="utf-8") as f:
+        for chunk in all_chunks:
+            f.write(json.dumps(chunk, ensure_ascii=False) + "\n")
+    
+    # Save metadata
+    meta_file = os.path.join(args.outdir, "meta.json")
+    meta_data = {
+        "embedding_model": args.model,
+        "dim": dimension,
+        "num_chunks": total_chunks,
+        "chunk_tokens": args.chunk_tokens,
+        "overlap_tokens": args.chunk_overlap,
+        "source_file": os.path.abspath(args.input)
+    }
+    with open(meta_file, "w", encoding="utf-8") as f:
+        json.dump(meta_data, f, ensure_ascii=False, indent=2)
+    
+    # Create BM25 index
+    print("Creating BM25 index...")
+    from rank_bm25 import BM25Okapi
+    tokenized_chunks = [re.findall(r"\w+", chunk["chunk_text"].lower()) for chunk in all_chunks]
+    bm25 = BM25Okapi(tokenized_chunks)
+    
+    # Save BM25 index
+    bm25_file = os.path.join(args.outdir, "bm25.pkl")
+    with open(bm25_file, "wb") as f:
+        pickle.dump({"bm25": bm25, "chunks_meta": all_chunks}, f)
+    
     print(f"Index saved to {args.outdir}")
+    print(f"Chunks metadata saved to {chunks_file}")
+    print(f"Metadata saved to {meta_file}")
+    print(f"BM25 index saved to {bm25_file}")
 
 
 if __name__ == "__main__":

@@ -57,4 +57,4 @@ def save_args(args: argparse.Namespace, path: str) -> None:
 
 
 def save_index(index: faiss.Index, path: str) -> None:
-    faiss.write_index(index, os.path.join(path, "index.faiss"))
+    faiss.write_index(index, os.path.join(path, "faiss.index"))

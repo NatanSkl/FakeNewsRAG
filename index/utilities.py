@@ -7,6 +7,10 @@ from typing import Any, List, Iterable
 
 
 def load_dataframe(path: str, limit: int = 0, chunksize: int = 0) -> pd.DataFrame:
+    # If we have a limit, always use chunked reading to avoid loading entire file into memory
+    if limit > 0 and chunksize <= 0:
+        chunksize = 10000  # Default chunk size for limited reading
+    
     if chunksize <= 0:
         df = pd.read_csv(path)
         if limit and limit > 0:
@@ -21,7 +25,7 @@ def load_dataframe(path: str, limit: int = 0, chunksize: int = 0) -> pd.DataFram
                 break
             chunk = chunk.head(limit - read_rows)
         frames.append(chunk)
-        read_rows += chunksize
+        read_rows += len(chunk)
         if limit and read_rows >= limit:
             break
     return pd.concat(frames, ignore_index=True)

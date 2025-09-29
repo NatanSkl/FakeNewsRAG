@@ -57,7 +57,7 @@ def test_lost_in_middle(store, query_text: str, verbose: bool = True):
             
             print(f"[{i}] Score: {final_score:.4f} (orig: {original_score:.4f}, sent: {sent_score:.4f}, boost: {boost:.4f})")
             print(f"     Text: {h.get('chunk_text', '')}...")
-            print(f"     Domain: {h.get('source_domain', 'unknown')}")
+            print(f"     ID: {h.get('id', 'unknown')}")
             print()
     
     return hits_with_sent
@@ -100,7 +100,7 @@ def test_sentence_scoring_effectiveness(store, query_text: str):
         
         print(f"[{i}] Sentence Score: {sent_score:.4f} | Final: {final_score:.4f} | Orig: {original_score:.4f}")
         print(f"     Text: {h.get('chunk_text', '')[:150]}...")
-        print(f"     Domain: {h.get('source_domain', 'unknown')}")
+        print(f"     ID: {h.get('id', 'unknown')}")
         print()
     
     # Show documents that got the biggest boost

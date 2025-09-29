@@ -60,9 +60,9 @@ def test_domain_cap_basic(store: Store, query: str, verbose: bool = False) -> No
     print(f"Results without domain cap: {len(results_without_cap)}")
     print()
     
-    # Analyze domain distribution
-    domains_with_cap = [r.get('source_domain', 'unknown') for r in results_with_cap]
-    domains_without_cap = [r.get('source_domain', 'unknown') for r in results_without_cap]
+    # Analyze ID distribution (using ID as proxy for diversity)
+    domains_with_cap = [r.get('id', 'unknown') for r in results_with_cap]
+    domains_without_cap = [r.get('id', 'unknown') for r in results_without_cap]
     
     domain_counts_with_cap = Counter(domains_with_cap)
     domain_counts_without_cap = Counter(domains_without_cap)
@@ -91,7 +91,7 @@ def test_domain_cap_basic(store: Store, query: str, verbose: bool = False) -> No
         print("\nDetailed results with domain cap:")
         for i, result in enumerate(results_with_cap[:5]):
             print(f"  {i+1}. {result.get('title', 'No title')[:50]}...")
-            print(f"     Domain: {result.get('source_domain', 'unknown')}")
+            print(f"     ID: {result.get('id', 'unknown')}")
             print(f"     Score: {result.get('score', 0):.4f}")
             print()
 
@@ -118,7 +118,7 @@ def test_domain_cap_effectiveness(store: Store, query: str) -> None:
         
         results, _ = hybrid_once(store, query, cfg, label_filter=None)
         results = apply_domain_cap(results, cfg.domain_cap)
-        domains = [r.get('source_domain', 'unknown') for r in results]
+        domains = [r.get('id', 'unknown') for r in results]
         domain_counts = Counter(domains)
         
         unique_domains = len(domain_counts)
@@ -176,7 +176,7 @@ def test_domain_cap_vs_diversity(store: Store, query: str) -> None:
     for name, cfg in configs.items():
         results, _ = hybrid_once(store, query, cfg, label_filter=None)
         results = apply_domain_cap(results, cfg.domain_cap)
-        domains = [r.get('source_domain', 'unknown') for r in results]
+        domains = [r.get('id', 'unknown') for r in results]
         domain_counts = Counter(domains)
         
         unique_domains = len(domain_counts)
@@ -213,7 +213,7 @@ def test_domain_cap_sensitivity(store: Store, query: str) -> None:
         results, _ = hybrid_once(store, query, cfg, label_filter=None)
         results_by_cap[cap] = results
         
-        domains = [r.get('source_domain', 'unknown') for r in results]
+        domains = [r.get('id', 'unknown') for r in results]
         domain_counts = Counter(domains)
         
         unique_domains = len(domain_counts)
@@ -282,7 +282,7 @@ def test_domain_cap_with_metadata(store: Store, query: str) -> None:
         
         results, _ = hybrid_once(store, query, cfg, label_filter=None)
         results = apply_domain_cap(results, cfg.domain_cap)
-        domains = [r.get('source_domain', 'unknown') for r in results]
+        domains = [r.get('id', 'unknown') for r in results]
         domain_counts = Counter(domains)
         
         unique_domains = len(domain_counts)

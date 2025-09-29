@@ -56,7 +56,7 @@ def test_cross_encoder_basic(store, query_text: str, verbose: bool = True):
                 
                 print(f"[{i}] Score: {final_score:.4f} (orig: {original_score:.4f}, CE boost: {ce_boost:.4f})")
                 print(f"     Text: {h.get('chunk_text', '')[:100]}...")
-                print(f"     Domain: {h.get('source_domain', 'unknown')}")
+                print(f"     ID: {h.get('id', 'unknown')}")
                 print()
         
         return hits_ce
@@ -281,7 +281,7 @@ def test_cross_encoder_vs_no_ce(store, query_text: str):
         # Compare top results
         print("\nTop 5 results WITHOUT cross-encoder:")
         for i, h in enumerate(hits_no_ce[:5], 1):
-            print(f"[{i}] Score: {h.get('rrf', 0.0):.4f} | Domain: {h.get('source_domain', 'unknown')}")
+            print(f"[{i}] Score: {h.get('rrf', 0.0):.4f} | ID: {h.get('id', 'unknown')}")
             print(f"     Text: {h.get('chunk_text', '')[:100]}...")
             print()
         
@@ -290,7 +290,7 @@ def test_cross_encoder_vs_no_ce(store, query_text: str):
             original_score = h.get('rrf', 0.0)
             final_score = h.get('_score', original_score)
             ce_boost = final_score - original_score
-            print(f"[{i}] Score: {final_score:.4f} (orig: {original_score:.4f}, CE boost: {ce_boost:.4f}) | Domain: {h.get('source_domain', 'unknown')}")
+            print(f"[{i}] Score: {final_score:.4f} (orig: {original_score:.4f}, CE boost: {ce_boost:.4f}) | ID: {h.get('id', 'unknown')}")
             print(f"     Text: {h.get('chunk_text', '')[:100]}...")
             print()
         

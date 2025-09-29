@@ -52,7 +52,7 @@ def test_hybrid_basic(store, query_text: str, verbose: bool = True):
             rrf_score = h.get('rrf', 0.0)
             print(f"  [{i}] RRF Score: {rrf_score:.4f}")
             print(f"      Text: {h.get('chunk_text', '')[:80]}...")
-            print(f"      Domain: {h.get('source_domain', 'unknown')}")
+            print(f"      ID: {h.get('id', 'unknown')}")
     
     return hits
 
@@ -88,7 +88,7 @@ def test_hybrid_weight_sensitivity(store, query_text: str):
         max_score = max([h.get('rrf', 0.0) for h in hits]) if hits else 0.0
         
         # Calculate domain diversity
-        domains = [h.get('source_domain', 'unknown') for h in hits]
+        domains = [h.get('id', 'unknown') for h in hits]
         unique_domains = len(set(domains))
         diversity_ratio = unique_domains / len(domains) if domains else 0
         
@@ -171,26 +171,26 @@ def test_dense_vs_sparse_vs_hybrid(store, query_text: str):
     # Compare top results
     print("\nTop 3 DENSE ONLY results:")
     for i, h in enumerate(hits_dense[:3], 1):
-        print(f"[{i}] Score: {h.get('rrf', 0.0):.4f} | Domain: {h.get('source_domain', 'unknown')}")
+        print(f"[{i}] Score: {h.get('rrf', 0.0):.4f} | ID: {h.get('id', 'unknown')}")
         print(f"     Text: {h.get('chunk_text', '')[:100]}...")
         print()
     
     print("Top 3 SPARSE ONLY results:")
     for i, h in enumerate(hits_sparse[:3], 1):
-        print(f"[{i}] Score: {h.get('rrf', 0.0):.4f} | Domain: {h.get('source_domain', 'unknown')}")
+        print(f"[{i}] Score: {h.get('rrf', 0.0):.4f} | ID: {h.get('id', 'unknown')}")
         print(f"     Text: {h.get('chunk_text', '')[:100]}...")
         print()
     
     print("Top 3 HYBRID results:")
     for i, h in enumerate(hits_hybrid[:3], 1):
-        print(f"[{i}] Score: {h.get('rrf', 0.0):.4f} | Domain: {h.get('source_domain', 'unknown')}")
+        print(f"[{i}] Score: {h.get('rrf', 0.0):.4f} | ID: {h.get('id', 'unknown')}")
         print(f"     Text: {h.get('chunk_text', '')[:100]}...")
         print()
     
     # Compare metrics
     def analyze_results(hits, name):
         scores = [h.get('rrf', 0.0) for h in hits]
-        domains = [h.get('source_domain', 'unknown') for h in hits]
+        domains = [h.get('id', 'unknown') for h in hits]
         unique_domains = len(set(domains))
         
         print(f"{name} metrics:")
@@ -243,7 +243,7 @@ def test_rrf_effectiveness(store, query_text: str):
         rrf_score = h.get('rrf', 0.0)
         print(f"[{i}] RRF Score: {rrf_score:.4f}")
         print(f"     Text: {h.get('chunk_text', '')[:150]}...")
-        print(f"     Domain: {h.get('source_domain', 'unknown')}")
+        print(f"     ID: {h.get('id', 'unknown')}")
         print()
     
     # Analyze domain distribution
@@ -291,7 +291,7 @@ def test_hybrid_with_different_queries(store):
         
         # Calculate metrics
         scores = [h.get('rrf', 0.0) for h in hits]
-        domains = [h.get('source_domain', 'unknown') for h in hits]
+        domains = [h.get('id', 'unknown') for h in hits]
         unique_domains = len(set(domains))
         
         print(f"Results: {len(hits)}")
@@ -326,7 +326,7 @@ def test_hybrid_candidate_sets(store, query_text: str):
         
         # Calculate metrics
         scores = [h.get('rrf', 0.0) for h in hits]
-        domains = [h.get('source_domain', 'unknown') for h in hits]
+        domains = [h.get('id', 'unknown') for h in hits]
         unique_domains = len(set(domains))
         
         results.append({

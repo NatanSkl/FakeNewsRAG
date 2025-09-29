@@ -51,8 +51,8 @@ def test_xquad_basic(store, query_text: str, verbose: bool = True):
         
         # Show domain diversity
         print("\nDomain diversity comparison:")
-        domains_no_xquad = [h.get('source_domain', 'unknown') for h in hits_no_xquad[:10]]
-        domains_xquad = [h.get('source_domain', 'unknown') for h in hits_xquad[:10]]
+        domains_no_xquad = [h.get('id', 'unknown') for h in hits_no_xquad[:10]]
+        domains_xquad = [h.get('id', 'unknown') for h in hits_xquad[:10]]
         
         print("Without xQuAD:", set(domains_no_xquad))
         print("With xQuAD:", set(domains_xquad))
@@ -102,8 +102,8 @@ def test_xquad_aspect_analysis(store, query_text: str):
         aspects_vecs = store.emb.encode(aspects_text, normalize_embeddings=True).astype("float32")
         hits_xquad = xquad_diversify(store, qv, hits_no_xquad, list(aspects_vecs), cfg)
         
-        domains_no_xquad = [h.get('source_domain', 'unknown') for h in hits_no_xquad]
-        domains_xquad = [h.get('source_domain', 'unknown') for h in hits_xquad]
+        domains_no_xquad = [h.get('id', 'unknown') for h in hits_no_xquad]
+        domains_xquad = [h.get('id', 'unknown') for h in hits_xquad]
         
         diversity_no_xquad = len(set(domains_no_xquad)) / len(domains_no_xquad) if domains_no_xquad else 0
         diversity_xquad = len(set(domains_xquad)) / len(domains_xquad) if domains_xquad else 0
@@ -148,7 +148,7 @@ def test_xquad_lambda_sensitivity(store, query_text: str):
         hits_xquad = xquad_diversify(store, qv, hits_base, list(aspects_vecs), cfg)
         
         # Calculate diversity metrics
-        domains = [h.get('source_domain', 'unknown') for h in hits_xquad]
+        domains = [h.get('id', 'unknown') for h in hits_xquad]
         unique_domains = len(set(domains))
         total_docs = len(domains)
         diversity_ratio = unique_domains / total_docs if total_docs > 0 else 0
@@ -224,13 +224,13 @@ def test_xquad_vs_no_xquad(store, query_text: str):
     # Compare top results
     print("\nTop 5 results WITHOUT xQuAD:")
     for i, h in enumerate(hits_no_xquad[:5], 1):
-        print(f"[{i}] Score: {h.get('rrf', 0.0):.4f} | Domain: {h.get('source_domain', 'unknown')}")
+        print(f"[{i}] Score: {h.get('rrf', 0.0):.4f} | ID: {h.get('id', 'unknown')}")
         print(f"     Text: {h.get('chunk_text', '')[:100]}...")
         print()
     
     print("Top 5 results WITH xQuAD:")
     for i, h in enumerate(hits_xquad[:5], 1):
-        print(f"[{i}] Score: {h.get('rrf', 0.0):.4f} | Domain: {h.get('source_domain', 'unknown')}")
+        print(f"[{i}] Score: {h.get('rrf', 0.0):.4f} | ID: {h.get('id', 'unknown')}")
         print(f"     Text: {h.get('chunk_text', '')[:100]}...")
         print()
     
@@ -281,8 +281,8 @@ def test_xquad_with_different_queries(store):
         aspects_vecs = store.emb.encode(aspects_text, normalize_embeddings=True).astype("float32")
         hits_xquad = xquad_diversify(store, qv, hits_base, list(aspects_vecs), cfg)
         
-        domains_base = [h.get('source_domain', 'unknown') for h in hits_base]
-        domains_xquad = [h.get('source_domain', 'unknown') for h in hits_xquad]
+        domains_base = [h.get('id', 'unknown') for h in hits_base]
+        domains_xquad = [h.get('id', 'unknown') for h in hits_xquad]
         
         diversity_base = len(set(domains_base)) / len(domains_base) if domains_base else 0
         diversity_xquad = len(set(domains_xquad)) / len(domains_xquad) if domains_xquad else 0
@@ -321,7 +321,7 @@ def test_xquad_aspect_quality(store, query_text: str):
         
         hits, qv = hybrid_once(store, aspect, cfg, label_filter=None)
         
-        domains = [h.get('source_domain', 'unknown') for h in hits]
+        domains = [h.get('id', 'unknown') for h in hits]
         unique_domains = len(set(domains))
         total_docs = len(domains)
         diversity_ratio = unique_domains / total_docs if total_docs > 0 else 0

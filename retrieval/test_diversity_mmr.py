@@ -43,7 +43,7 @@ def test_mmr_basic(store, query_text: str, verbose: bool = True):
         
         print(f"Results: {len(hits)}")
         print("Top 5 domains:")
-        domains = [h.get('source_domain', 'unknown') for h in hits[:5]]
+        domains = [h.get('id', 'unknown') for h in hits[:5]]
         domain_counts = {}
         for d in domains:
             domain_counts[d] = domain_counts.get(d, 0) + 1
@@ -86,7 +86,7 @@ def test_mmr_diversity_analysis(store, query_text: str):
     
     # Analyze domain diversity
     def analyze_diversity(hits, name):
-        domains = [h.get('source_domain', 'unknown') for h in hits]
+        domains = [h.get('id', 'unknown') for h in hits]
         domain_counts = {}
         for d in domains:
             domain_counts[d] = domain_counts.get(d, 0) + 1
@@ -136,7 +136,7 @@ def test_mmr_lambda_sensitivity(store, query_text: str):
         hits, qv = hybrid_once(store, query_text, cfg, label_filter=None)
         
         # Calculate diversity metrics
-        domains = [h.get('source_domain', 'unknown') for h in hits]
+        domains = [h.get('id', 'unknown') for h in hits]
         unique_domains = len(set(domains))
         total_docs = len(domains)
         diversity_ratio = unique_domains / total_docs if total_docs > 0 else 0
@@ -206,19 +206,19 @@ def test_mmr_vs_no_mmr(store, query_text: str):
     # Compare top results
     print("\nTop 5 results WITHOUT MMR (pure relevance):")
     for i, h in enumerate(hits_no_mmr[:5], 1):
-        print(f"[{i}] Score: {h.get('rrf', 0.0):.4f} | Domain: {h.get('source_domain', 'unknown')}")
+        print(f"[{i}] Score: {h.get('rrf', 0.0):.4f} | ID: {h.get('id', 'unknown')}")
         print(f"     Text: {h.get('chunk_text', '')[:100]}...")
         print()
     
     print("Top 5 results WITH MMR (balanced):")
     for i, h in enumerate(hits_mmr[:5], 1):
-        print(f"[{i}] Score: {h.get('rrf', 0.0):.4f} | Domain: {h.get('source_domain', 'unknown')}")
+        print(f"[{i}] Score: {h.get('rrf', 0.0):.4f} | ID: {h.get('id', 'unknown')}")
         print(f"     Text: {h.get('chunk_text', '')[:100]}...")
         print()
     
     # Compare diversity
-    domains_no_mmr = [h.get('source_domain', 'unknown') for h in hits_no_mmr]
-    domains_mmr = [h.get('source_domain', 'unknown') for h in hits_mmr]
+    domains_no_mmr = [h.get('id', 'unknown') for h in hits_no_mmr]
+    domains_mmr = [h.get('id', 'unknown') for h in hits_mmr]
     
     print(f"Domain diversity - No MMR: {len(set(domains_no_mmr))}/{len(domains_no_mmr)}")
     print(f"Domain diversity - With MMR: {len(set(domains_mmr))}/{len(domains_mmr)}")
@@ -256,7 +256,7 @@ def test_mmr_with_different_queries(store):
         
         hits, qv = hybrid_once(store, query, cfg, label_filter=None)
         
-        domains = [h.get('source_domain', 'unknown') for h in hits]
+        domains = [h.get('id', 'unknown') for h in hits]
         unique_domains = len(set(domains))
         total_docs = len(domains)
         diversity_ratio = unique_domains / total_docs if total_docs > 0 else 0

@@ -56,10 +56,10 @@ def test_mqe_basic(store, article_text: str, title_hint: str = None, verbose: bo
         
         if verbose:
             print(f"Results: {len(hits)}")
-            print(f"Top 3 domains: {list(set([h.get('source_domain', 'unknown') for h in hits[:3]]))}")
+            print(f"Top 3 IDs: {list(set([h.get('id', 'unknown') for h in hits[:3]]))}")
     
     if verbose:
-        print(f"\nTotal unique results across all variants: {len(set([(h.get('doc_id'), h.get('chunk_id')) for h in all_results]))}")
+        print(f"\nTotal unique results across all variants: {len(set([(h.get('id'), h.get('chunk_id')) for h in all_results]))}")
     
     return variants, all_results
 
@@ -94,7 +94,7 @@ def test_claimify_effectiveness(store, article_text: str):
         
         hits, qv = hybrid_once(store, claimified, cfg, label_filter=None)
         
-        domains = [h.get('source_domain', 'unknown') for h in hits]
+        domains = [h.get('id', 'unknown') for h in hits]
         unique_domains = len(set(domains))
         
         print(f"Retrieval results: {len(hits)}, Unique domains: {unique_domains}")
@@ -137,7 +137,7 @@ def test_mqe_variant_quality(store, article_text: str, title_hint: str = None):
         
         hits, qv = hybrid_once(store, variant, cfg, label_filter=None)
         
-        domains = [h.get('source_domain', 'unknown') for h in hits]
+        domains = [h.get('id', 'unknown') for h in hits]
         unique_domains = len(set(domains))
         avg_score = np.mean([h.get('rrf', 0.0) for h in hits]) if hits else 0.0
         
@@ -191,7 +191,7 @@ def test_mqe_vs_single_query(store, article_text: str, title_hint: str = None):
     seen = set()
     unique_mqe_results = []
     for h in all_mqe_results:
-        key = (h.get('doc_id'), h.get('chunk_id'))
+        key = (h.get('id'), h.get('chunk_id'))
         if key not in seen:
             seen.add(key)
             unique_mqe_results.append(h)
@@ -204,8 +204,8 @@ def test_mqe_vs_single_query(store, article_text: str, title_hint: str = None):
     print(f"MQE results: {len(unique_mqe_results)}")
     
     # Compare domain diversity
-    domains_single = [h.get('source_domain', 'unknown') for h in hits_single]
-    domains_mqe = [h.get('source_domain', 'unknown') for h in unique_mqe_results]
+    domains_single = [h.get('id', 'unknown') for h in hits_single]
+    domains_mqe = [h.get('id', 'unknown') for h in unique_mqe_results]
     
     diversity_single = len(set(domains_single)) / len(domains_single) if domains_single else 0
     diversity_mqe = len(set(domains_mqe)) / len(domains_mqe) if domains_mqe else 0
@@ -218,13 +218,13 @@ def test_mqe_vs_single_query(store, article_text: str, title_hint: str = None):
     # Show top results
     print(f"\nTop 3 single query results:")
     for i, h in enumerate(hits_single[:3], 1):
-        print(f"[{i}] Score: {h.get('rrf', 0.0):.4f} | Domain: {h.get('source_domain', 'unknown')}")
+        print(f"[{i}] Score: {h.get('rrf', 0.0):.4f} | ID: {h.get('id', 'unknown')}")
         print(f"     Text: {h.get('chunk_text', '')[:100]}...")
         print()
     
     print(f"Top 3 MQE results:")
     for i, h in enumerate(unique_mqe_results[:3], 1):
-        print(f"[{i}] Score: {h.get('rrf', 0.0):.4f} | Domain: {h.get('source_domain', 'unknown')}")
+        print(f"[{i}] Score: {h.get('rrf', 0.0):.4f} | ID: {h.get('id', 'unknown')}")
         print(f"     Text: {h.get('chunk_text', '')[:100]}...")
         print()
     
@@ -273,7 +273,7 @@ def test_mqe_with_different_articles(store):
         
         hits, qv = hybrid_once(store, variants[0], cfg, label_filter=None)
         
-        domains = [h.get('source_domain', 'unknown') for h in hits]
+        domains = [h.get('id', 'unknown') for h in hits]
         unique_domains = len(set(domains))
         
         print(f"Retrieval results: {len(hits)}, Unique domains: {unique_domains}")
@@ -305,7 +305,7 @@ def test_mqe_variant_overlap(store, article_text: str, title_hint: str = None):
     variant_results = []
     for i, variant in enumerate(variants, 1):
         hits, qv = hybrid_once(store, variant, cfg, label_filter=None)
-        doc_ids = set([h.get('doc_id') for h in hits])
+        doc_ids = set([h.get('id') for h in hits])
         variant_results.append({
             'variant': i,
             'text': variant,

@@ -3,3 +3,71 @@ venv/*
 artifacts/*
 news_sample.csv
 *__pycache__*
+
+# Modèles LLM (trop volumineux pour Git)
+models/
+*.gguf
+*.bin
+*.safetensors
+
+# Résultats temporaires
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.html
+evaluation_results/
+test_results/
+demo_results/
+
+# Fichiers Python temporaires
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.pytest_cache/
+
+# Environnements virtuels
+venv/
+env/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Fichiers temporaires
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# Fichiers de test avec bugs
+test_real_rag.py
+test_rag_vs_llama.py
+final_rag_vs_llama_test.py
+
+# Fichiers supprimés/inutiles
+test_evaluation_no_llm.py
+comprehensive_evaluation_report.py
+demo_evaluation.py
+setup_llm_server.py
+example_evaluation.py
+run_evaluation.py
+mock_llm_server.py
+test_with_mock_llm.py
+fast_evaluation.py
+*.md
+# Fichiers de configuration locaux
+.env
+config.local.py

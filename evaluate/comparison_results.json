@@ -1,0 +1,63 @@
+{
+  "timestamp": "2025-09-28 18:10:22",
+  "llama_results": [
+    {
+      "content": "Bitcoin manipulation",
+      "true_label": "fake",
+      "prediction": "credible",
+      "correct": false,
+      "time": 3.2251548767089844,
+      "response": ""
+    },
+    {
+      "content": "Scientific study",
+      "true_label": "credible",
+      "prediction": "credible",
+      "correct": true,
+      "time": 2.155729055404663,
+      "response": "finds that eating a diet rich in fruits and vegetables"
+    },
+    {
+      "content": "UFO conspiracy",
+      "true_label": "fake",
+      "prediction": "credible",
+      "correct": false,
+      "time": 0.5298581123352051,
+      "response": "theories"
+    },
+    {
+      "content": "Climate research",
+      "true_label": "credible",
+      "prediction": "credible",
+      "correct": true,
+      "time": 0.5916657447814941,
+      "response": "is being conducted by a team of scientists at a"
+    }
+  ],
+  "rag_results": [
+    {
+      "query": "Bitcoin manipulation conspiracy",
+      "fake_hits": 0,
+      "credible_hits": 0,
+      "time": 15.64879584312439
+    },
+    {
+      "query": "Scientific research study",
+      "fake_hits": 0,
+      "credible_hits": 0,
+      "time": 15.144909143447876
+    },
+    {
+      "query": "UFO alien technology",
+      "fake_hits": 0,
+      "credible_hits": 0,
+      "time": 15.231486320495605
+    },
+    {
+      "query": "Climate change data",
+      "fake_hits": 0,
+      "credible_hits": 0,
+      "time": 15.283346176147461
+    }
+  ]
+}

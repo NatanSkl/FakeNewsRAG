@@ -2,22 +2,11 @@ import os
 import json
 from typing import Any, List, Iterable, Dict
 
-try:
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-    import pandas as pd
-    import numpy as np
-    import faiss
-    import argparse
-except ImportError:
-    print("[WARN] Missing dependencies. Installing now.")
-    os.system("pip install pyarrow pandas numpy faiss argparse")
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-    import pandas as pd
-    import numpy as np
-    import faiss
-    import argparse
+import pyarrow as pa
+import pyarrow.parquet as pq
+import pandas as pd
+import numpy as np
+import argparse
 
 
 def load_dataframe_chunks(

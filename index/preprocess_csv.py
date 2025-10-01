@@ -81,7 +81,11 @@ def split(csv_path, output_dir, test_split, validation_split):
         for chunk in reader:
             test = chunk.sample(frac=test_split, replace=False, random_state=SEED)
             rest = chunk.drop(test.index)
-            val = rest.sample(frac=validation_split * (1 - test_split), replace=False, random_state=SEED)
+            val = rest.sample(
+                frac=validation_split * (1 - test_split),
+                replace=False,
+                random_state=SEED,
+            )
             train = rest.drop(val.index)
 
             if os.path.isfile(train_out):

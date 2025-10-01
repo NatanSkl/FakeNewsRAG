@@ -49,6 +49,9 @@ def preprocess_chunk(chunk):
 
 
 def preprocess(csv_path, output_path):
+    if os.path.exists(output_path):
+        print("preprocessed file {} already exists".format(output_path))
+        return
     row_count = 0
     with pd.read_csv(
         csv_path,
@@ -63,7 +66,6 @@ def preprocess(csv_path, output_path):
             else:
                 new_chunk.to_csv(output_path, index=False, header=True)
             del chunk, new_chunk
-    return row_count
 
 
 def split(csv_path, output_dir, test_split, validation_split):
@@ -78,8 +80,9 @@ def split(csv_path, output_dir, test_split, validation_split):
     ) as reader:
         for chunk in reader:
             test = chunk.sample(frac=test_split, replace=False, random_state=SEED)
-            val = chunk.sample(frac=validation_split, replace=False, random_state=SEED)
-            train = chunk.drop(test.index).drop(val.index)
+            rest = chunk.drop(test.index)
+            val = rest.sample(frac=validation_split * (1 - test_split), replace=False, random_state=SEED)
+            train = rest.drop(val.index)
 
             if os.path.isfile(train_out):
                 train.to_csv(train_out, mode="a", header=False, index=False)
@@ -98,7 +101,7 @@ def split(csv_path, output_dir, test_split, validation_split):
 def main():
     args = parse_args()
     filepath = os.path.join(args.out_dir, "news_preprocessed.csv")
-    # preprocess(args.input, filepath)
+    preprocess(args.input, filepath)
     split(filepath, args.out_dir, args.test_split, args.val_split)
 
 

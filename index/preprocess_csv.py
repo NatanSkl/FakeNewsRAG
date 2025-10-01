@@ -97,9 +97,9 @@ def split(csv_path, output_dir, test_split, validation_split):
 
 def main():
     args = parse_args()
-    row_count = preprocess(
-        args.input, os.path.join(args.out_dir, "news_preprocessed.csv")
-    )
+    filepath = os.path.join(args.out_dir, "news_preprocessed.csv")
+    # preprocess(args.input, filepath)
+    split(filepath, args.out_dir, args.test_split, args.val_split)
 
 
 if __name__ == "__main__":

@@ -42,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint-every", type=int, default=2e5)
 
     # Model parameters
-    parser.add_argument("--model", default="Qwen/Qwen3-Embedding-8B")
+    parser.add_argument("--model", default="Qwen/Qwen3-Embedding-0.6B")
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--normalize", action="store_true")
 

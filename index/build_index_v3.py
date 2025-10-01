@@ -1,6 +1,7 @@
 import os
 import argparse
-from typing import List, Tuple, Dict, Any
+import pickle
+from typing import List, Tuple, Dict, Any, Union
 
 import utilities_v3 as utils
 
@@ -11,11 +12,12 @@ try:
     import numpy as np
     import pandas as pd
     from tqdm import tqdm
+    from rank_bm25 import BM25Okapi
     from sentence_transformers import SentenceTransformer
 except ImportError:
     print("[WARN] Missing dependencies. Installing now.")
     os.system(
-        "pip install torch faiss-cpt tiktoken sentence_transformers pandas numpy tqdm pyarrow"
+        "pip install torch rank-bm25 faiss-cpt tiktoken sentence_transformers pandas numpy tqdm pyarrow"
     )
     import faiss
     import torch
@@ -23,6 +25,7 @@ except ImportError:
     import numpy as np
     import pandas as pd
     from tqdm import tqdm
+    from rank_bm25 import BM25Okapi
     from sentence_transformers import SentenceTransformer
 
 
@@ -34,8 +37,9 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--input", required=True)
     parser.add_argument("--out-dir", default="data")
+    parser.add_argument("--b25-out", type=str, default="bm25.pkl")
     parser.add_argument("--limit", type=int, default=0)
-    parser.add_argument("--checkpoint-every", type=int, default=10**5)
+    parser.add_argument("--checkpoint-every", type=int, default=2e5)
 
     # Model parameters
     parser.add_argument("--model", default="Qwen/Qwen3-Embedding-8B")
@@ -43,7 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--normalize", action="store_true")
 
     # Tokenization and chunking parameters
-    parser.add_argument("--chunk-size", type=int, default=10**5)
+    parser.add_argument("--chunk-size", type=int, default=1e5)
     parser.add_argument("--chunk-tokens", type=int, default=0)
     parser.add_argument("--chunk-overlap", type=int, default=50)
     parser.add_argument("--use-encoding", action="store_true")
@@ -198,46 +202,46 @@ def build_index(
 
 def chunk_tokens(
     text: str, encoder: tiktoken.Encoding, chunk_size: int, chunk_overlap: int
-) -> List[str]:
+) -> List[Tuple[str, List[int]]]:
+    tokens = encoder.encode(text or "")
     if chunk_size <= 0:
-        return [text]
+        return [(text, tokens)]
     if chunk_overlap < 0 or chunk_overlap >= chunk_size:
         raise ValueError(
             "[ERROR] overlap must be non-negative and smaller than chunk size"
         )
-    tokens = encoder.encode(text or "")
     if len(tokens) <= chunk_size:
-        return [text]
-    chunks = []
+        return [(text, tokens)]
+    chunks: List[Tuple[str, List[int]]] = []
     start = 0
     step = chunk_size - chunk_overlap
     while start < len(tokens):
         end = min(len(tokens), start + chunk_size)
         piece = tokens[start:end]
-        chunks.append(encoder.decode(piece))
+        chunks.append((encoder.decode(piece),piece))
         if end == len(tokens):
             break
         start += step
     return chunks
 
 
-def chunk_words(text: str, chunk_size: int, chunk_overlap: int) -> List[str]:
+def chunk_words(text: str, chunk_size: int, chunk_overlap: int) -> List[Tuple[str, List[str]]]:
+    words = text.split()
     if chunk_size <= 0:
-        return [text]
+        return [(text, words)]
     if chunk_overlap < 0 or chunk_overlap >= chunk_size:
         raise ValueError(
             "[ERROR] overlap must be non-negative and smaller than chunk size"
         )
-    words = text.split()
     if len(words) <= chunk_size:
-        return [text]
-    chunks: List[str] = []
+        return [(text, words)]
+    chunks: List[Tuple[str, List[str]]] = []
     step = chunk_size - chunk_overlap
     for start in range(0, len(words), step):
         piece_words = words[start : start + chunk_size]
         if not piece_words:
             break
-        chunks.append(" ".join(piece_words))
+        chunks.append((" ".join(piece_words), piece_words))
         if start + chunk_size >= len(words):
             break
     return chunks
@@ -253,6 +257,9 @@ def add_vectors_streaming(
     added = 0
     out_path = os.path.join(args.out_dir, "index.faiss")
 
+    bm25_corpus: List[List[str]] = []
+    bm25_ids: List[int] = []
+
     for df in utils.load_dataframe_chunks(
         args.input, limit=args.limit, chunksize=args.chunk_size
     ):
@@ -264,7 +271,6 @@ def add_vectors_streaming(
         ).tolist()
 
         # row-by-row chunking
-
         if args.chunk_tokens <= 0:
             # no chunking
             db_ids = df["id"].astype(str).tolist()
@@ -303,43 +309,38 @@ def add_vectors_streaming(
                 texts_list,
             ):
                 if args.use_encoding:
-                    chunks = chunk_tokens(
+                    chunks_tuples = chunk_tokens(
                         text, encoder, args.chunk_tokens, args.chunk_overlap
                     )
                 else:
-                    chunks = chunk_words(text, args.chunk_tokens, args.chunk_overlap)
-                for chunk_id, chunk in enumerate(chunks):
-                    if not chunk.strip():
+                    chunks_tuples = chunk_words(text, args.chunk_tokens, args.chunk_overlap)
+                for chunk_id, (chunk_text, tokens) in enumerate(chunks_tuples):
+                    if not chunk_text.strip():
                         continue
                     v_id = utils.make_vector_id(db_id, chunk_id)
                     ids.append(v_id)
-                    texts.append(chunk)
+                    texts.append(chunk_text)
+                    meta_rows.append(
+                        {
+                            "vector_id": v_id,
+                            "db_id": db_id,
+                            "chunk_id": chunk_id,
+                            "label": label,
+                            "title": title,
+                            "content": content,
+                            "token_count": len(tokens),
+                        }
+                    )
                     if args.use_encoding:
-                        meta_rows.append(
-                            {
-                                "vector_id": v_id,
-                                "db_id": db_id,
-                                "chunk_id": chunk_id,
-                                "label": label,
-                                "title": title,
-                                "content": content,
-                                "token_count": len(encoder.encode(chunk)),
-                            }
-                        )
+                        bm25_corpus.append([str(token) for token in tokens])
                     else:
-                        meta_rows.append(
-                            {
-                                "vector_id": v_id,
-                                "db_id": db_id,
-                                "chunk_id": chunk_id,
-                                "label": label,
-                                "title": title,
-                                "content": content,
-                                "token_count": len(chunk.split()),
-                            }
-                        )
+                        bm25_corpus.append(tokens)
+                    bm25_ids.append(v_id)
+
+
         if not texts:
             continue
+
         batch_embeddings = embed_batches(texts, model, args.batch_size, args.normalize)
         ids_array = np.array(ids, dtype=np.int64)
         index.add_with_ids(batch_embeddings, ids_array)
@@ -347,9 +348,17 @@ def add_vectors_streaming(
         metadata_sink.write(meta_rows)
         if added % args.checkpoint_every < len(ids_array):
             faiss.write_index(index, out_path)
+            print(f"[INFO] Checkpointed at {added} vectors")
 
     faiss.write_index(index, out_path)
-    return added
+    print(f"[INFO] Done adding vectors. Total added: {added}")
+    print(f"[INFO] Training BM25 on {len(bm25_corpus)} documents]")
+    bm25 = BM25Okapi(bm25_corpus)  # ,tokenizer=encoder)
+    bm25.doc_ids = bm25_ids
+    bm25_path = os.path.join(args.out_dir, args.bm25_out)
+    with open (bm25_path, "wb") as bm25_file:
+        pickle.dump(bm25, bm25_file)
+    print(f"[INFO] Done saving BM25 vectors to {bm25_path}]")
 
 
 def main() -> None:
@@ -384,19 +393,22 @@ def main() -> None:
         except Exception:
             pass
         dim = index.d
+        print(f"[INFO] Index loaded: {index_path}")
 
     else:
         index, dim = build_index(args, model)
+        print(f"[INFO] Index built: {index_path}")
 
     # Open metadata sink
     metadata_sink = utils.get_metadata_sink(
         args.out_dir, args.save_metadata_as, append=args.append
     )
+    print(f"[INFO] Metadata sink opened: {metadata_sink.get_path()}")
 
-    total = add_vectors_streaming(args, index, model, encoder, metadata_sink)
+    add_vectors_streaming(args, index, model, encoder, metadata_sink)
 
     metadata_sink.close()
-    print(f"[INFO] Total new vectors: {total}")
+    print(f"[INFO] Metadata sink closed.")
 
 
 if __name__ == "__main__":

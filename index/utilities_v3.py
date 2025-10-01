@@ -76,15 +76,23 @@ def make_vector_id(db_id: str, chunk_id: int) -> np.int64:
 
 
 class MetadataSink:
+    def __init__(self, path: str, append: bool = False) -> None:
+        self.path = path
+        self.append = append
+
     def write(self, rows: List[Dict[str, Any]]) -> None:
         raise NotImplementedError
 
     def close(self) -> None:
         raise NotImplementedError
 
+    def get_path(self) -> str:
+        return self.path
+
 
 class ParquetSink(MetadataSink):
     def __init__(self, path: str, append: bool = False) -> None:
+        super().__init__(path, append)
         self.append = append
         self.path = os.path.join(path, "metadata.parquet")
         self.writer = None
@@ -109,6 +117,7 @@ class ParquetSink(MetadataSink):
 
 class CSVSink(MetadataSink):
     def __init__(self, path: str, append: bool = False) -> None:
+        super().__init__(path, append)
         self.append = append
         self.path = os.path.join(path, "metadata.csv")
         self.header_written = False
@@ -128,6 +137,7 @@ class CSVSink(MetadataSink):
 
 class JSONLSink(MetadataSink):
     def __init__(self, path: str, append: bool = False) -> None:
+        super().__init__(path, append)
         self.append = append
         self.path = os.path.join(path, "metadata.jsonl")
         self.file = open(self.path, "a" if self.append else "w", encoding="utf-8")

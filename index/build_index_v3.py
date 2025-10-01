@@ -1,7 +1,7 @@
 import os
 import argparse
 import pickle
-from typing import List, Tuple, Dict, Any, Union
+from typing import List, Tuple, Dict, Any
 
 import utilities_v3 as utils
 
@@ -218,14 +218,16 @@ def chunk_tokens(
     while start < len(tokens):
         end = min(len(tokens), start + chunk_size)
         piece = tokens[start:end]
-        chunks.append((encoder.decode(piece),piece))
+        chunks.append((encoder.decode(piece), piece))
         if end == len(tokens):
             break
         start += step
     return chunks
 
 
-def chunk_words(text: str, chunk_size: int, chunk_overlap: int) -> List[Tuple[str, List[str]]]:
+def chunk_words(
+    text: str, chunk_size: int, chunk_overlap: int
+) -> List[Tuple[str, List[str]]]:
     words = text.split()
     if chunk_size <= 0:
         return [(text, words)]
@@ -253,7 +255,7 @@ def add_vectors_streaming(
     model: SentenceTransformer,
     encoder: tiktoken.Encoding,
     metadata_sink: utils.MetadataSink,
-) -> int:
+) -> None:
     added = 0
     out_path = os.path.join(args.out_dir, "index.faiss")
 
@@ -313,7 +315,9 @@ def add_vectors_streaming(
                         text, encoder, args.chunk_tokens, args.chunk_overlap
                     )
                 else:
-                    chunks_tuples = chunk_words(text, args.chunk_tokens, args.chunk_overlap)
+                    chunks_tuples = chunk_words(
+                        text, args.chunk_tokens, args.chunk_overlap
+                    )
                 for chunk_id, (chunk_text, tokens) in enumerate(chunks_tuples):
                     if not chunk_text.strip():
                         continue
@@ -337,7 +341,6 @@ def add_vectors_streaming(
                         bm25_corpus.append(tokens)
                     bm25_ids.append(v_id)
 
-
         if not texts:
             continue
 
@@ -356,7 +359,7 @@ def add_vectors_streaming(
     bm25 = BM25Okapi(bm25_corpus)  # ,tokenizer=encoder)
     bm25.doc_ids = bm25_ids
     bm25_path = os.path.join(args.out_dir, args.bm25_out)
-    with open (bm25_path, "wb") as bm25_file:
+    with open(bm25_path, "wb") as bm25_file:
         pickle.dump(bm25, bm25_file)
     print(f"[INFO] Done saving BM25 vectors to {bm25_path}]")
 
@@ -371,7 +374,6 @@ def main() -> None:
         device = "cuda"
     else:
         device = "cpu"
-
     # Initialize tokenizer and model
     encoder = tiktoken.get_encoding(args.encoding)
     model = SentenceTransformer(args.model, device=device)

@@ -48,9 +48,15 @@ def preprocess_chunk(chunk):
     return new_chunk
 
 
+def check_exists(path: str) -> bool:
+    if os.path.exists(path):
+        print("File exists: {}".format(path))
+        return True
+    return False
+
+
 def preprocess(csv_path, output_path):
-    if os.path.exists(output_path):
-        print("preprocessed file {} already exists, skipping".format(output_path))
+    if check_exists(csv_path):
         return
     row_count = 0
     with pd.read_csv(
@@ -73,6 +79,8 @@ def split(csv_path, output_dir, test_split, validation_split):
     train_out = os.path.join(output_dir, "train.csv")
     test_out = os.path.join(output_dir, "test.csv")
     val_out = os.path.join(output_dir, "val.csv")
+    if os.path.isfile(train_out) or os.path.isfile(test_out) or os.path.isfile(val_out):
+        return
     with pd.read_csv(
         csv_path,
         chunksize=CHUNK_SIZE,

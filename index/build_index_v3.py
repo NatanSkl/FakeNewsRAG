@@ -86,7 +86,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     args = parser.parse_args()
-    utils.save_args(args, args.out_dir)
+    utils.save_args(args, args.out_dir, "build_index")
     return args
 
 

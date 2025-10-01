@@ -35,7 +35,7 @@ def validate_columns(columns: Iterable[str], required: List[str]):
         raise ValueError(f"[ERROR] Missing required columns in CSV: {missing}")
 
 
-def save_args(args: argparse.Namespace, path: str) -> None:
+def save_args(args: argparse.Namespace, path: str, file: str) -> None:
     """
     Save the provided command-line arguments to a JSON file in a given directory.
     """
@@ -43,7 +43,7 @@ def save_args(args: argparse.Namespace, path: str) -> None:
     if "input" in args_dict and args_dict["input"] is not None:
         args_dict["input"] = os.path.abspath(args_dict["input"])
     os.makedirs(path, exist_ok=True)
-    with open(os.path.join(path, "args.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(path, f"{file}_args.json"), "w", encoding="utf-8") as f:
         json.dump(args_dict, f, ensure_ascii=False, indent=4)
 
 

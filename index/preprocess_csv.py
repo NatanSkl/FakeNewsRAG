@@ -22,7 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-split", type=float, default=0.05)
 
     args = parser.parse_args()
-    utils.save_args(args, args.out_dir)
+    utils.save_args(args, args.out_dir, "preprocess_csv")
     return args
 
 

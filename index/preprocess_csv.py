@@ -50,7 +50,7 @@ def preprocess_chunk(chunk):
 
 def preprocess(csv_path, output_path):
     if os.path.exists(output_path):
-        print("preprocessed file {} already exists".format(output_path))
+        print("preprocessed file {} already exists, skipping".format(output_path))
         return
     row_count = 0
     with pd.read_csv(
@@ -82,7 +82,7 @@ def split(csv_path, output_dir, test_split, validation_split):
             test = chunk.sample(frac=test_split, replace=False, random_state=SEED)
             rest = chunk.drop(test.index)
             val = rest.sample(
-                frac=validation_split * (1 - test_split),
+                frac=validation_split / (1 - test_split),
                 replace=False,
                 random_state=SEED,
             )

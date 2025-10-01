@@ -21,6 +21,10 @@ from rank_bm25 import BM25Okapi
 
 # Retrieval helpers
 
+def _get_timestamp() -> str:
+    """Get current time in HH:MM format."""
+    return dt.datetime.now().strftime("%H:%M")
+
 def rrf(rank: int, k: int = 60) -> float:  # Reciprocal Rank Fusion
     return 1.0 / (k + rank)
 
@@ -373,22 +377,22 @@ def retrieve_evidence(store: Store,
                       cfg: RetrievalConfig,
                       verbose: bool = False) -> List[Dict[str, Any]]:
     if verbose:
-        print(f"[retrieve_evidence] Starting retrieval for: '{article_text[:100]}...'")
-        print(f"[retrieve_evidence] Title hint: {title_hint}")
-        print(f"[retrieve_evidence] Label filter: {label_name}")
-        print(f"[retrieve_evidence] Config: k_dense={cfg.k_dense}, k_bm25={cfg.k_bm25}, topn={cfg.topn}")
+        print(f"[{_get_timestamp()}] [retrieve_evidence] Starting retrieval for: '{article_text[:100]}...'")
+        print(f"[{_get_timestamp()}] [retrieve_evidence] Title hint: {title_hint}")
+        print(f"[{_get_timestamp()}] [retrieve_evidence] Label filter: {label_name}")
+        print(f"[{_get_timestamp()}] [retrieve_evidence] Config: k_dense={cfg.k_dense}, k_bm25={cfg.k_bm25}, topn={cfg.topn}")
     
     # multi-query expansion
     if verbose:
-        print(f"[retrieve_evidence] Generating query variants...")
+        print(f"[{_get_timestamp()}] [retrieve_evidence] Generating query variants...")
     variants = make_mqe_variants(article_text, title_hint, store.emb)
     if not variants:
         if verbose:
-            print(f"[retrieve_evidence] No variants generated, returning empty results")
+            print(f"[{_get_timestamp()}] [retrieve_evidence] No variants generated, returning empty results")
         return []
     
     if verbose:
-        print(f"[retrieve_evidence] Generated {len(variants)} variants:")
+        print(f"[{_get_timestamp()}] [retrieve_evidence] Generated {len(variants)} variants:")
         for i, variant in enumerate(variants, 1):
             print(f"  [{i}] {variant[:100]}...")
 
@@ -396,19 +400,19 @@ def retrieve_evidence(store: Store,
     fuse_scores: Dict[Tuple[str, str], float] = defaultdict(float)
 
     if verbose:
-        print(f"[retrieve_evidence] Processing {len(variants)} variants...")
+        print(f"[{_get_timestamp()}] [retrieve_evidence] Processing {len(variants)} variants...")
 
     for i, v in enumerate(variants, 1):
         if verbose:
-            print(f"[retrieve_evidence] Processing variant {i}/{len(variants)}: '{v[:80]}...'")
+            print(f"[{_get_timestamp()}] [retrieve_evidence] Processing variant {i}/{len(variants)}: '{v[:80]}...'")
         
         hits, qv = hybrid_once(store, v, cfg, label_filter=label_name)
         if verbose:
-            print(f"[retrieve_evidence]   hybrid_once returned {len(hits)} hits")
+            print(f"[{_get_timestamp()}] [retrieve_evidence]   hybrid_once returned {len(hits)} hits")
         
         hits = sentence_maxpool_boost(store, qv, hits, cfg)
         if verbose:
-            print(f"[retrieve_evidence]   sentence_maxpool_boost returned {len(hits)} hits")
+            print(f"[{_get_timestamp()}] [retrieve_evidence]   sentence_maxpool_boost returned {len(hits)} hits")
 
         for r, h in enumerate(hits, 1):
             key = (h.get("doc_id", h.get("id", "unknown")), h.get("chunk_id", 0))
@@ -422,53 +426,53 @@ def retrieve_evidence(store: Store,
                 )
         
         if verbose:
-            print(f"[retrieve_evidence]   Added {len(hits)} hits to pool (total unique: {len(pooled)})")
+            print(f"[{_get_timestamp()}] [retrieve_evidence]   Added {len(hits)} hits to pool (total unique: {len(pooled)})")
 
     if verbose:
-        print(f"[retrieve_evidence] Merging results from {len(pooled)} unique documents...")
+        print(f"[{_get_timestamp()}] [retrieve_evidence] Merging results from {len(pooled)} unique documents...")
     
     merged = [pooled[k] for k in sorted(fuse_scores, key=fuse_scores.get, reverse=True)]
     if verbose:
-        print(f"[retrieve_evidence] Merged to {len(merged)} results")
+        print(f"[{_get_timestamp()}] [retrieve_evidence] Merged to {len(merged)} results")
 
     cfg_local = dataclass_replace(cfg, label_filter=label_name)
     if verbose:
-        print(f"[retrieve_evidence] Applying metadata filter...")
+        print(f"[{_get_timestamp()}] [retrieve_evidence] Applying metadata filter...")
     merged = filter_by_metadata(merged, cfg_local)
     if verbose:
-        print(f"[retrieve_evidence] After metadata filter: {len(merged)} results")
+        print(f"[{_get_timestamp()}] [retrieve_evidence] After metadata filter: {len(merged)} results")
     
     if verbose:
-        print(f"[retrieve_evidence] Applying domain cap (cap={cfg.domain_cap})...")
+        print(f"[{_get_timestamp()}] [retrieve_evidence] Applying domain cap (cap={cfg.domain_cap})...")
     merged = apply_domain_cap(merged, cap=cfg.domain_cap)
     if verbose:
-        print(f"[retrieve_evidence] After domain cap: {len(merged)} results")
+        print(f"[{_get_timestamp()}] [retrieve_evidence] After domain cap: {len(merged)} results")
 
     if cfg.use_xquad and merged:
         if verbose:
-            print(f"[retrieve_evidence] Applying xQuAD diversification...")
+            print(f"[{_get_timestamp()}] [retrieve_evidence] Applying xQuAD diversification...")
         aspects_text = variants[:cfg.xquad_aspects]
         aspects_vecs = store.emb.encode(aspects_text, normalize_embeddings=True).astype("float32")
         merged = xquad_diversify(store, encode(store.emb, article_text)[0], merged, list(aspects_vecs), cfg)
         if verbose:
-            print(f"[retrieve_evidence] After xQuAD: {len(merged)} results")
+            print(f"[{_get_timestamp()}] [retrieve_evidence] After xQuAD: {len(merged)} results")
 
     if cfg.use_cross_encoder and merged:
         if verbose:
-            print(f"[retrieve_evidence] Applying cross-encoder reranking...")
+            print(f"[{_get_timestamp()}] [retrieve_evidence] Applying cross-encoder reranking...")
         try:
             ce = CrossEncoder(cfg.cross_encoder_model)
             merged = cross_encoder_rerank(ce, article_text, merged, cfg)
             if verbose:
-                print(f"[retrieve_evidence] After cross-encoder: {len(merged)} results")
+                print(f"[{_get_timestamp()}] [retrieve_evidence] After cross-encoder: {len(merged)} results")
         except Exception as e:
             if verbose:
-                print(f"[retrieve_evidence] Cross-encoder failed: {e}")
+                print(f"[{_get_timestamp()}] [retrieve_evidence] Cross-encoder failed: {e}")
 
     final_results = merged[:cfg.topn]
     if verbose:
-        print(f"[retrieve_evidence] Final results: {len(final_results)} (limited to topn={cfg.topn})")
-        print(f"[retrieve_evidence] Retrieval completed successfully!")
+        print(f"[{_get_timestamp()}] [retrieve_evidence] Final results: {len(final_results)} (limited to topn={cfg.topn})")
+        print(f"[{_get_timestamp()}] [retrieve_evidence] Retrieval completed successfully!")
     
     return final_results
 

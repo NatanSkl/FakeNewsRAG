@@ -14,6 +14,7 @@ from common.llm_client import Llama, Mistral, LocalLLM
 from retrieval import load_store, retrieve_evidence, RetrievalConfig
 
 import numpy as np
+import datetime as dt
 from dataclasses import dataclass
 from typing import List, Dict, Any
 
@@ -28,13 +29,19 @@ class RAGOutput:
     retrieval_config: RetrievalConfig
 
 
+def _get_timestamp() -> str:
+    """Get current time in HH:MM format."""
+    return dt.datetime.now().strftime("%H:%M")
+
+
 def classify_article_rag(
     article_title: str,
     article_content: str,
     *,
     store_dir: str = "mini_index/store",
     llm: LocalLLM,
-    retrieval_config: RetrievalConfig | None = None
+    retrieval_config: RetrievalConfig | None = None,
+    verbose: bool = False
 ) -> RAGOutput:
     """
     Full RAG pipeline for article classification.
@@ -45,82 +52,113 @@ def classify_article_rag(
         store_dir: Path to the index store
         llm: Language model for summarization and classification
         retrieval_config: Configuration for retrieval (uses defaults if None)
+        verbose: Whether to print verbose output with timestamps
     
     Returns:
         RAGOutput with classification results and evidence
     """
+    if verbose:
+        print(f"[{_get_timestamp()}] [RAG Pipeline] Starting classification for: '{article_title[:50]}...'")
+        print(f"[{_get_timestamp()}] [RAG Pipeline] Store directory: {store_dir}")
+    
     # Load the index store
+    if verbose:
+        print(f"[{_get_timestamp()}] [RAG Pipeline] Loading index store...")
     store = load_store(store_dir)
+    if verbose:
+        print(f"[{_get_timestamp()}] [RAG Pipeline] Index store loaded successfully")
     
     # Use default config if none provided
     if retrieval_config is None:
         retrieval_config = RetrievalConfig()
+        if verbose:
+            print(f"[{_get_timestamp()}] [RAG Pipeline] Using default retrieval config")
     
     # Retrieve evidence for both labels
-    print("Retrieving fake evidence...")
+    if verbose:
+        print(f"[{_get_timestamp()}] [RAG Pipeline] Retrieving fake evidence...")
     fake_hits = retrieve_evidence(
         store, 
         article_content, 
         title_hint=article_title, 
         label_name="fake", 
-        cfg=retrieval_config
+        cfg=retrieval_config,
+        verbose=verbose
     )
+    if verbose:
+        print(f"[{_get_timestamp()}] [RAG Pipeline] Retrieved {len(fake_hits)} fake evidence chunks")
     
-    print("Retrieving credible evidence...")
+    if verbose:
+        print(f"[{_get_timestamp()}] [RAG Pipeline] Retrieving credible evidence...")
     credible_hits = retrieve_evidence(
         store, 
         article_content, 
         title_hint=article_title, 
         label_name="credible", 
-        cfg=retrieval_config
+        cfg=retrieval_config,
+        verbose=verbose
     )
+    if verbose:
+        print(f"[{_get_timestamp()}] [RAG Pipeline] Retrieved {len(credible_hits)} credible evidence chunks")
     
     # Convert hits to EvidenceChunk objects
+    if verbose:
+        print(f"[{_get_timestamp()}] [RAG Pipeline] Converting evidence to chunks...")
     fake_evidence = [
         EvidenceChunk(
-            content=h["chunk_text"],
-            source=h.get("source_domain", ""),
+            id=h.get("id", "unknown"),
             title=h.get("title", ""),
-            url=h.get("url", ""),
-            published_at=h.get("published_at", ""),
-            score=h.get("_score", h.get("rrf", 0.0))
+            text=h["chunk_text"],
+            label="fake"
         )
         for h in fake_hits
     ]
     
     credible_evidence = [
         EvidenceChunk(
-            content=h["chunk_text"],
-            source=h.get("source_domain", ""),
+            id=h.get("id", "unknown"),
             title=h.get("title", ""),
-            url=h.get("url", ""),
-            published_at=h.get("published_at", ""),
-            score=h.get("_score", h.get("rrf", 0.0))
+            text=h["chunk_text"],
+            label="reliable"
         )
         for h in credible_hits
     ]
+    if verbose:
+        print(f"[{_get_timestamp()}] [RAG Pipeline] Converted to {len(fake_evidence)} fake and {len(credible_evidence)} credible evidence chunks")
     
     # Create Article object
+    if verbose:
+        print(f"[{_get_timestamp()}] [RAG Pipeline] Creating article object...")
     article = Article(
+        id="test_article",
         title=article_title,
-        content=article_content
+        text=article_content
     )
     
     # Generate contrastive summaries
-    print("Generating summaries...")
-    fake_summary, reliable_summary = contrastive_summaries(
-        article, fake_evidence, credible_evidence, llm
+    if verbose:
+        print(f"[{_get_timestamp()}] [RAG Pipeline] Generating contrastive summaries...")
+    summaries = contrastive_summaries(
+        llm, article, fake_evidence, credible_evidence
     )
+    fake_summary = summaries["fake_summary"]
+    reliable_summary = summaries["reliable_summary"]
+    if verbose:
+        print(f"[{_get_timestamp()}] [RAG Pipeline] Summaries generated successfully")
     
     # Classify the article
-    print("Classifying article...")
+    if verbose:
+        print(f"[{_get_timestamp()}] [RAG Pipeline] Classifying article...")
     classification = classify_article(
+        llm,
         article_title, 
         article_content, 
         fake_summary, 
-        reliable_summary, 
-        llm
+        reliable_summary
     )
+    if verbose:
+        print(f"[{_get_timestamp()}] [RAG Pipeline] Classification completed: {classification.prediction} (confidence: {classification.confidence:.3f})")
+        print(f"[{_get_timestamp()}] [RAG Pipeline] RAG pipeline completed successfully!")
     
     return RAGOutput(
         classification=classification,

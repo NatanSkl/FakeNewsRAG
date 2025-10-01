@@ -3,7 +3,6 @@ venv/*
 artifacts/*
 news_sample.csv
 *__pycache__*
-<<<<<<< HEAD
 
 # Modèles LLM (trop volumineux pour Git)
 models/
@@ -78,4 +77,5 @@ index_tmp/store/
 index_tmp/store_full/
 *.md
 index/data/
->>>>>>> 16c66e53002411a1ed0684d8e22deb9ef481ce3d
+index/store_slice
+models/

@@ -78,7 +78,7 @@ class LocalLLM:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
         }
-        url = f"{self.base_url.rstrip('/')}/chat/completions"
+        url = f"{self.base_url.rstrip('/')}/v1/chat/completions"
         t0 = time.time()
         resp = self._session.post(url, headers=headers, data=json.dumps(body), timeout=self.timeout)
         dt = (time.time() - t0) * 1000

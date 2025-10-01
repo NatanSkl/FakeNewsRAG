@@ -1,7 +1,8 @@
-from __future__ import annotations
-from generate.summary import Article, EvidenceChunk, contrastive_summaries
-from classify.classifier import classify_article, ClassificationResult
-from common.llm_client import Llama, Mistral, LocalLLM
+"""
+Core retrieval functions for the FakeNewsRAG system.
+
+This module contains the fundamental retrieval algorithms and data structures.
+"""
 
 import numpy as np
 import faiss
@@ -18,10 +19,7 @@ from sentence_transformers import SentenceTransformer, CrossEncoder
 from rank_bm25 import BM25Okapi
 
 
-
-
-
-#retrieval helpers
+# Retrieval helpers
 
 def rrf(rank: int, k: int = 60) -> float:  # Reciprocal Rank Fusion
     return 1.0 / (k + rank)
@@ -115,7 +113,7 @@ def encode(emb: SentenceTransformer, text: str) -> np.ndarray:
     return v.astype("float32")
 
 
-#retrieval config
+# Retrieval config
 
 @dataclass
 class RetrievalConfig:
@@ -372,21 +370,48 @@ def retrieve_evidence(store: Store,
                       title_hint: str | None,
                       *,
                       label_name: str,
-                      cfg: RetrievalConfig) -> List[Dict[str, Any]]:
+                      cfg: RetrievalConfig,
+                      verbose: bool = False) -> List[Dict[str, Any]]:
+    if verbose:
+        print(f"[retrieve_evidence] Starting retrieval for: '{article_text[:100]}...'")
+        print(f"[retrieve_evidence] Title hint: {title_hint}")
+        print(f"[retrieve_evidence] Label filter: {label_name}")
+        print(f"[retrieve_evidence] Config: k_dense={cfg.k_dense}, k_bm25={cfg.k_bm25}, topn={cfg.topn}")
+    
     # multi-query expansion
+    if verbose:
+        print(f"[retrieve_evidence] Generating query variants...")
     variants = make_mqe_variants(article_text, title_hint, store.emb)
     if not variants:
+        if verbose:
+            print(f"[retrieve_evidence] No variants generated, returning empty results")
         return []
+    
+    if verbose:
+        print(f"[retrieve_evidence] Generated {len(variants)} variants:")
+        for i, variant in enumerate(variants, 1):
+            print(f"  [{i}] {variant[:100]}...")
 
     pooled: Dict[Tuple[str, str], Dict[str, Any]] = {}
     fuse_scores: Dict[Tuple[str, str], float] = defaultdict(float)
 
-    for v in variants:
+    if verbose:
+        print(f"[retrieve_evidence] Processing {len(variants)} variants...")
+
+    for i, v in enumerate(variants, 1):
+        if verbose:
+            print(f"[retrieve_evidence] Processing variant {i}/{len(variants)}: '{v[:80]}...'")
+        
         hits, qv = hybrid_once(store, v, cfg, label_filter=label_name)
+        if verbose:
+            print(f"[retrieve_evidence]   hybrid_once returned {len(hits)} hits")
+        
         hits = sentence_maxpool_boost(store, qv, hits, cfg)
+        if verbose:
+            print(f"[retrieve_evidence]   sentence_maxpool_boost returned {len(hits)} hits")
 
         for r, h in enumerate(hits, 1):
-            key = (h["doc_id"], h["chunk_id"])
+            key = (h.get("doc_id", h.get("id", "unknown")), h.get("chunk_id", 0))
             fuse_scores[key] += rrf(r)
             if key not in pooled:
                 pooled[key] = h
@@ -395,27 +420,57 @@ def retrieve_evidence(store: Store,
                     pooled[key].get("_score", 0.0),
                     h.get("_score", 0.0)
                 )
+        
+        if verbose:
+            print(f"[retrieve_evidence]   Added {len(hits)} hits to pool (total unique: {len(pooled)})")
 
+    if verbose:
+        print(f"[retrieve_evidence] Merging results from {len(pooled)} unique documents...")
+    
     merged = [pooled[k] for k in sorted(fuse_scores, key=fuse_scores.get, reverse=True)]
+    if verbose:
+        print(f"[retrieve_evidence] Merged to {len(merged)} results")
 
     cfg_local = dataclass_replace(cfg, label_filter=label_name)
+    if verbose:
+        print(f"[retrieve_evidence] Applying metadata filter...")
     merged = filter_by_metadata(merged, cfg_local)
+    if verbose:
+        print(f"[retrieve_evidence] After metadata filter: {len(merged)} results")
+    
+    if verbose:
+        print(f"[retrieve_evidence] Applying domain cap (cap={cfg.domain_cap})...")
     merged = apply_domain_cap(merged, cap=cfg.domain_cap)
+    if verbose:
+        print(f"[retrieve_evidence] After domain cap: {len(merged)} results")
 
     if cfg.use_xquad and merged:
+        if verbose:
+            print(f"[retrieve_evidence] Applying xQuAD diversification...")
         aspects_text = variants[:cfg.xquad_aspects]
         aspects_vecs = store.emb.encode(aspects_text, normalize_embeddings=True).astype("float32")
         merged = xquad_diversify(store, encode(store.emb, article_text)[0], merged, list(aspects_vecs), cfg)
+        if verbose:
+            print(f"[retrieve_evidence] After xQuAD: {len(merged)} results")
 
     if cfg.use_cross_encoder and merged:
+        if verbose:
+            print(f"[retrieve_evidence] Applying cross-encoder reranking...")
         try:
             ce = CrossEncoder(cfg.cross_encoder_model)
             merged = cross_encoder_rerank(ce, article_text, merged, cfg)
-        except Exception:
-            pass
+            if verbose:
+                print(f"[retrieve_evidence] After cross-encoder: {len(merged)} results")
+        except Exception as e:
+            if verbose:
+                print(f"[retrieve_evidence] Cross-encoder failed: {e}")
 
-
-    return merged[:cfg.topn]
+    final_results = merged[:cfg.topn]
+    if verbose:
+        print(f"[retrieve_evidence] Final results: {len(final_results)} (limited to topn={cfg.topn})")
+        print(f"[retrieve_evidence] Retrieval completed successfully!")
+    
+    return final_results
 
 
 def dataclass_replace(cfg: RetrievalConfig, **kw) -> RetrievalConfig:
@@ -423,111 +478,3 @@ def dataclass_replace(cfg: RetrievalConfig, **kw) -> RetrievalConfig:
     d = cfg.__dict__.copy()
     d.update(kw)
     return RetrievalConfig(**d)
-
-
-
-def to_evidence_chunks(hits: List[Dict[str, Any]],
-                       target_label_for_summary: str) -> List[EvidenceChunk]:
-    """
-    Map index labels to EvidenceChunk labels expected by the generation module.
-    Index uses: 'fake' | 'credible' | 'other'
-    Summaries expect: 'fake' | 'reliable'
-    """
-    mapped: List[EvidenceChunk] = []
-    for h in hits:
-        lab = h.get("label", "")
-        if lab == "fake":
-            l2 = "fake"
-        elif lab == "credible":
-            l2 = "reliable"
-        else:
-            continue
-        if l2 != target_label_for_summary:
-            continue
-        mapped.append(EvidenceChunk(
-            id=f"{h['doc_id']}:{h['chunk_id']}",
-            title=h.get("title", ""),
-            text=h.get("chunk_text", ""),
-            label=l2,
-        ))
-    return mapped
-
-
-@dataclass
-class RAGOutput:
-    classification: ClassificationResult
-    fake_summary: str
-    reliable_summary: str
-    fake_evidence: List[EvidenceChunk]
-    reliable_evidence: List[EvidenceChunk]
-
-
-def classify_article_rag(
-    article_title: str,
-    article_content: str,
-    store_dir: str = "mini_index/store",
-    llm: LocalLLM | None = None,
-    title_hint: str | None = None,
-    topn_per_label: int = 12,
-) -> RAGOutput:
-    """
-    Full pipeline:
-      retrieval (fake & credible) -> two summaries -> classifier -> result
-    """
-    store = load_store(store_dir)
-
-    # configure retrieval
-    rcfg = RetrievalConfig(
-        topn_per_label=topn_per_label,
-        label_filter=None,
-        date_from=None, date_to=None,
-        lang_whitelist=set(),
-        domain_whitelist=set(),
-        domain_blacklist=set(),
-        min_source_score=None,
-    )
-
-
-    fake_hits = retrieve_evidence(
-        store, article_content, title_hint,
-        label_name="fake", cfg=rcfg
-    )
-    credible_hits = retrieve_evidence(
-        store, article_content, title_hint,
-        label_name="credible", cfg=rcfg
-    )
-
-    ev_fake = to_evidence_chunks(fake_hits, "fake")
-    ev_reliable = to_evidence_chunks(credible_hits, "reliable")
-    llm = llm or Llama()
-
-
-    summaries = contrastive_summaries(
-        llm=llm,
-        query=Article(id="query", title=article_title or "(untitled)", text=article_content or ""),
-        fake_evidence=ev_fake,
-        reliable_evidence=ev_reliable,
-        temperature=0.2,
-        max_tokens=500,
-    )
-    fake_summary = summaries["fake_summary"]
-    reliable_summary = summaries["reliable_summary"]
-
-
-    cls = classify_article(
-        llm=llm,
-        article_title=article_title or "(untitled)",
-        article_content=article_content or "",
-        fake_summary=fake_summary,
-        reliable_summary=reliable_summary,
-        temperature=0.1,
-        max_tokens=300,
-    )
-
-    return RAGOutput(
-        classification=cls,
-        fake_summary=fake_summary,
-        reliable_summary=reliable_summary,
-        fake_evidence=ev_fake,
-        reliable_evidence=ev_reliable,
-    )

@@ -1,0 +1,49 @@
+# Commands to run all test files in retrieval/ directory
+# Make sure to activate the virtual environment first:
+# cd /home/natan/PycharmProjects/FakeNewsRAG && source .venv/bin/activate && cd retrieval
+
+# Test Lost in the Middle mechanism
+python3 test_lost_in_middle.py --store ../index/store_slice --query "artificial intelligence machine learning" --test basic --verbose
+python3 test_lost_in_middle.py --store ../index/store_slice --query "climate change global warming" --test effectiveness
+
+# Test MMR Diversity mechanism
+python3 test_diversity_mmr.py --store ../index/store_slice --query "renewable energy solar power" --test basic --verbose
+python3 test_diversity_mmr.py --store ../index/store_slice --query "artificial intelligence machine learning" --test diversity
+
+# Test xQuAD Diversity mechanism
+python3 test_diversity_xquad.py --store ../index/store_slice --query "climate change global warming" --test basic --verbose
+python3 test_diversity_xquad.py --store ../index/store_slice --query "renewable energy solar power" --test diversity
+
+# Test Cross-Encoder Reranking mechanism
+python3 test_cross_encoder_reranking.py --store ../index/store_slice --query "artificial intelligence machine learning" --test basic --verbose
+python3 test_cross_encoder_reranking.py --store ../index/store_slice --query "climate change global warming" --test reranking
+
+# Test Multi-Query Expansion mechanism
+python3 test_multi_query_expansion.py --store ../index/store_slice --query "renewable energy solar power" --test basic --verbose
+python3 test_multi_query_expansion.py --store ../index/store_slice --query "artificial intelligence machine learning" --test expansion
+
+# Test Hybrid Retrieval mechanism
+python3 test_hybrid_retrieval.py --store ../index/store_slice --query "climate change global warming" --test basic
+python3 test_hybrid_retrieval.py --store ../index/store_slice --query "artificial intelligence machine learning" --test hybrid
+
+# Test Domain Diversity mechanism
+python3 test_domain_diversity.py --store ../index/store_slice --query "renewable energy solar power" --test basic --verbose
+python3 test_domain_diversity.py --store ../index/store_slice --query "artificial intelligence machine learning" --test diversity
+
+# Test Core Retrieval Function
+python3 test_retrieval.py --store ../index/store_slice --query "artificial intelligence machine learning" --test basic --verbose
+python3 test_retrieval.py --store ../index/store_slice --query "climate change global warming" --test different --verbose
+
+# Test Retrieval Performance Evaluation
+python3 eval_retrieval_performance.py --store ../index/store_slice --query "renewable energy solar power" --test basic
+python3 eval_retrieval_performance.py --store ../index/store_slice --query "artificial intelligence machine learning" --test performance
+
+# Alternative queries for more comprehensive testing:
+# python3 test_lost_in_middle.py --store ../index/store_slice --query "cryptocurrency bitcoin blockchain" --test basic --verbose
+# python3 test_diversity_mmr.py --store ../index/store_slice --query "vaccine covid pandemic" --test basic --verbose
+# python3 test_diversity_xquad.py --store ../index/store_slice --query "space exploration mars nasa" --test basic --verbose
+# python3 test_cross_encoder_reranking.py --store ../index/store_slice --query "quantum computing physics" --test basic --verbose
+# python3 test_multi_query_expansion.py --store ../index/store_slice --query "electric vehicles tesla" --test basic --verbose
+# python3 test_hybrid_retrieval.py --store ../index/store_slice --query "machine learning neural networks" --test basic
+# python3 test_domain_diversity.py --store ../index/store_slice --query "renewable energy wind power" --test basic --verbose
+# python3 test_retrieval.py --store ../index/store_slice --query "quantum computing physics" --test basic --verbose

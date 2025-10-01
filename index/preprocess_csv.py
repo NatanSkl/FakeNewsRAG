@@ -98,7 +98,7 @@ def split(csv_path, output_dir, test_split, validation_split):
 def main():
     args = parse_args()
     row_count = preprocess(
-        args.input, os.path.join(args.out_dir, "/news_preprocessed.csv")
+        args.input, os.path.join(args.out_dir, "news_preprocessed.csv")
     )
 
 

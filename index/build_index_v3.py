@@ -1,6 +1,7 @@
 import os
 import argparse
 import pickle
+import time
 from typing import List, Tuple, Dict, Any
 
 import utilities_v3 as utils
@@ -17,7 +18,7 @@ try:
 except ImportError:
     print("[WARN] Missing dependencies. Installing now.")
     os.system(
-        "pip install torch rank-bm25 faiss-cpt tiktoken sentence_transformers pandas numpy tqdm pyarrow"
+        "pip install torch rank-bm25 tiktoken sentence_transformers pandas numpy tqdm pyarrow"
     )
     import faiss
     import torch
@@ -42,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint-every", type=int, default=2e5)
 
     # Model parameters
-    parser.add_argument("--model", default="Qwen/Qwen3-Embedding-0.6B")
+    parser.add_argument("--model", default="sentence-transformers/all-MiniLM-L6-v2")
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--normalize", action="store_true")
 
@@ -93,11 +94,19 @@ def parse_args() -> argparse.Namespace:
 def embed_batches(
     texts: List[str], model: SentenceTransformer, batch_size: int, normalize: bool
 ) -> np.ndarray:
+    print(f"[DEBUG] embed_batches called with {len(texts)} texts, batch_size={batch_size}")
     vectors_list: List[np.ndarray] = []
+    encode_times = []
+    
     for i in range(0, len(texts), batch_size):
         batch = texts[i : i + batch_size]
         if not batch:
             continue
+        print(f"[DEBUG] Processing batch {i//batch_size + 1} with {len(batch)} texts")
+        print(f"[DEBUG] About to call model.encode()")
+        
+        # Time the model.encode() call
+        start_time = time.time()
         vectors = model.encode(
             batch,
             batch_size=batch_size,
@@ -105,10 +114,110 @@ def embed_batches(
             show_progress_bar=False,
             normalize_embeddings=normalize,
         ).astype(np.float32)
+        end_time = time.time()
+        
+        encode_time = end_time - start_time
+        encode_times.append(encode_time)
+        
+        print(f"[DEBUG] model.encode() completed in {encode_time:.3f}s, shape: {vectors.shape}")
         vectors_list.append(vectors)
+    
     if not vectors_list:
+        print("[DEBUG] No vectors generated, returning empty array")
         return np.zeros((0, 0), dtype=np.float32)
-    return np.vstack(vectors_list)
+    
+    # Calculate and report timing statistics
+    if encode_times:
+        avg_time = sum(encode_times) / len(encode_times)
+        total_time = sum(encode_times)
+        print(f"[TIMING] Model.encode() statistics:")
+        print(f"[TIMING]   - Total batches: {len(encode_times)}")
+        print(f"[TIMING]   - Average time per batch: {avg_time:.3f}s")
+        print(f"[TIMING]   - Total encoding time: {total_time:.3f}s")
+        print(f"[TIMING]   - Min time: {min(encode_times):.3f}s")
+        print(f"[TIMING]   - Max time: {max(encode_times):.3f}s")
+    
+    result = np.vstack(vectors_list)
+    print(f"[DEBUG] Final embeddings shape: {result.shape}")
+    return result
+
+
+def make_index_gpu(dim: int, args) -> faiss.Index:
+    """
+    Returns a FAISS index that is already on GPU (so train/add/search happen on GPU)
+    when supported. HNSW remains CPU (FAISS has no GPU HNSW).
+
+    Expected args:
+      - index_type: str  (e.g., "FlatIP", "FlatL2", "IVF1024,Flat", "IVFPQ", etc.)
+      - nlist: int       (for IVF/IVFPQ)
+      - pq_m: int        (for IVFPQ)
+      - pq_bits: int     (for IVFPQ, e.g., 8)
+      - hnsw_m: int      (for HNSW)
+      - shard: bool      (True=shard across GPUs, False=replicate)
+      - use_float16: bool (optional; default True for GPU speed)
+    """
+    use_ip = "IP" in args.index_type
+    metric = faiss.METRIC_INNER_PRODUCT if use_ip else faiss.METRIC_L2
+
+    # how many GPUs FAISS can see
+    ngpu = faiss.get_num_gpus()
+
+    # helper to configure multi-GPU cloning
+    def _multi_opts():
+        co = faiss.GpuMultipleClonerOptions()
+        co.shard = bool(getattr(args, "shard", False))      # shard or replicate
+        co.useFloat16 = bool(getattr(args, "use_float16", True))
+        # co.usePrecomputed = True  # enable if you precompute PQ tables
+        return co
+
+    # ---------- FLAT ----------
+    if args.index_type.startswith("Flat"):
+        if ngpu > 0:
+            res = faiss.StandardGpuResources()
+            if use_ip:
+                return faiss.GpuIndexFlatIP(res, dim)
+            else:
+                return faiss.GpuIndexFlatL2(res, dim)
+        # fallback CPU if no GPU visible
+        return faiss.IndexFlatIP(dim) if use_ip else faiss.IndexFlatL2(dim)
+
+    # ---------- IVF (no PQ) ----------
+    if args.index_type.startswith("IVF") and "PQ" not in args.index_type:
+        # build CPU structure, then wrap as GPU BEFORE train()
+        quantizer = faiss.IndexFlatIP(dim) if use_ip else faiss.IndexFlatL2(dim)
+        cpu_index = faiss.IndexIVFFlat(quantizer, dim, args.nlist, metric)
+        if ngpu > 0:
+            # move to GPU now; train/add/search will run on GPU
+            if ngpu == 1:
+                res = faiss.StandardGpuResources()
+                return faiss.index_cpu_to_gpu(res, 0, cpu_index)
+            else:
+                return faiss.index_cpu_to_all_gpus(cpu_index, co=_multi_opts())
+        return cpu_index
+
+    # ---------- IVFPQ ----------
+    if args.index_type.startswith("IVFPQ"):
+        quantizer = faiss.IndexFlatIP(dim) if use_ip else faiss.IndexFlatL2(dim)
+        cpu_index = faiss.IndexIVFPQ(quantizer, dim, args.nlist, args.pq_m, args.pq_bits, metric)
+        if ngpu > 0:
+            print("Faiss GPU is available")
+            if ngpu == 1:
+                res = faiss.StandardGpuResources()
+                return faiss.index_cpu_to_gpu(res, 0, cpu_index)
+            else:
+                return faiss.index_cpu_to_all_gpus(cpu_index, co=_multi_opts())
+        return cpu_index
+
+    # ---------- HNSW (CPU only in FAISS) ----------
+    if args.index_type.startswith("HNSW"):
+        m = args.hnsw_m
+        if metric == faiss.METRIC_INNER_PRODUCT:
+            return faiss.IndexHNSWFlat(dim, m, faiss.METRIC_INNER_PRODUCT)
+        else:
+            return faiss.IndexHNSWFlat(dim, m, faiss.METRIC_L2)
+
+    raise ValueError(f"[ERROR] Unsupported index type: {args.index_type}")
+
 
 
 def make_index(dim: int, args: argparse.Namespace) -> faiss.Index:
@@ -135,68 +244,93 @@ def make_index(dim: int, args: argparse.Namespace) -> faiss.Index:
 
 
 def infer_dim(args: argparse.Namespace, model: SentenceTransformer) -> int:
+    print("[DEBUG] infer_dim function started")
     for df in utils.load_dataframe_chunks(
         args.input, limit=args.limit, chunksize=args.chunk_size
     ):
+        print(f"[DEBUG] Processing chunk for dimension inference with {len(df)} rows")
         utils.validate_columns(df.columns, COLUMNS)
         texts = (df["title"].astype(str) + "\n" + df["content"].astype(str)).tolist()
         if not texts:
+            print("[DEBUG] No texts in chunk for dimension inference, skipping")
             continue
         batch = texts[: min(len(texts), args.batch_size)]
+        print(f"[DEBUG] About to embed batch of {len(batch)} texts for dimension inference")
         batch_embeddings = embed_batches(batch, model, args.batch_size, args.normalize)
         if batch_embeddings.size > 0:
-            return int(batch_embeddings.shape[1])
+            dim = int(batch_embeddings.shape[1])
+            print(f"[DEBUG] Successfully inferred dimension: {dim}")
+            return dim
     raise RuntimeError("[ERROR] Failed to infer embedding dimensions.")
 
 
 def build_index(
     args: argparse.Namespace, model: SentenceTransformer
 ) -> Tuple[faiss.Index, int]:
+    print("[DEBUG] build_index function started")
+    print("[DEBUG] About to call infer_dim")
     dim = infer_dim(args, model)
+    print(f"[DEBUG] infer_dim completed, dimension: {dim}")
+    print("[DEBUG] About to call make_index")
     pre_index = make_index(dim, args)
+    print("[DEBUG] make_index completed successfully")
 
     # IVF / IVFPQ, if picked as index type
     if isinstance(pre_index, faiss.IndexIVF):
+        print("[DEBUG] Index is IVF type, starting training sample collection")
         # Collect training sample
         sample_vectors: List[np.ndarray] = []
         total_sampled = 0
 
+        print("[DEBUG] About to start loading dataframe chunks for training")
         for df in utils.load_dataframe_chunks(
             args.input, limit=args.limit, chunksize=args.chunk_size
         ):
+            print(f"[DEBUG] Processing training chunk with {len(df)} rows")
             texts = (
                 df["title"].astype(str) + "\n" + df["content"].astype(str)
             ).tolist()
             if not texts:
+                print("[DEBUG] No texts in training chunk, skipping")
                 continue
 
             # Calc sample fraction
             frac = min(1.0, max(0.01, args.train_sample / max(len(texts), 1)))
             if 0 < frac < 1.0:
+                print(f"[DEBUG] Sampling {frac:.2%} of {len(texts)} texts for training")
                 samp = df.sample(frac=frac, random_state=1332)
                 texts = (
                     samp["title"].astype(str) + "\n" + samp["content"].astype(str)
                 ).tolist()
+            print(f"[DEBUG] About to embed {len(texts)} texts for training")
             batch_embeddings = embed_batches(
                 texts, model, args.batch_size, args.normalize
             )
             if batch_embeddings.size == 0:
+                print("[DEBUG] No embeddings generated for training, skipping")
                 continue
             sample_vectors.append(batch_embeddings)
             total_sampled += batch_embeddings.shape[0]
+            print(f"[DEBUG] Total sampled for training so far: {total_sampled}")
             if total_sampled >= args.train_sample:
+                print("[DEBUG] Reached training sample limit, breaking")
                 break
         if not sample_vectors:
             raise RuntimeError(
                 "[ERROR] Failed to sample vectors for IVF / IVFPQ training."
             )
+        print(f"[DEBUG] Training matrix shape: {len(sample_vectors)} vectors")
         train_matrix = np.vstack(sample_vectors).astype(np.float32)
+        print(f"[DEBUG] About to train index with matrix shape: {train_matrix.shape}")
         pre_index.train(train_matrix)
+        print("[DEBUG] Index training completed")
 
     # wrap pre_index with IDMap
+    print("[DEBUG] Wrapping index with IDMap")
     index = faiss.IndexIDMap2(pre_index)
     if isinstance(pre_index, faiss.IndexIVF):
         pre_index.nprobe = args.nprobe
+    print("[DEBUG] build_index function completed successfully")
     return index, dim
 
 
@@ -256,21 +390,25 @@ def add_vectors_streaming(
     encoder: tiktoken.Encoding,
     metadata_sink: utils.MetadataSink,
 ) -> None:
+    print("[DEBUG] add_vectors_streaming function started")
     added = 0
     out_path = os.path.join(args.out_dir, "index.faiss")
 
     bm25_corpus: List[List[str]] = []
     bm25_ids: List[int] = []
 
+    print("[DEBUG] About to start processing dataframe chunks")
     for df in utils.load_dataframe_chunks(
         args.input, limit=args.limit, chunksize=args.chunk_size
     ):
+        print(f"[DEBUG] Processing chunk with {len(df)} rows")
         utils.validate_columns(df.columns, COLUMNS)
         df = df[COLUMNS].dropna()
 
         texts_list = (
             df["title"].astype(str) + "\n" + df["content"].astype(str)
         ).tolist()
+        print(f"[DEBUG] Generated {len(texts_list)} texts from chunk")
 
         # row-by-row chunking
         if args.chunk_tokens <= 0:
@@ -342,14 +480,20 @@ def add_vectors_streaming(
                     bm25_ids.append(v_id)
 
         if not texts:
+            print("[DEBUG] No texts in chunk, skipping")
             continue
 
+        print(f"[DEBUG] About to embed {len(texts)} texts")
         batch_embeddings = embed_batches(texts, model, args.batch_size, args.normalize)
+        print(f"[DEBUG] Embeddings generated, shape: {batch_embeddings.shape}")
         ids_array = np.array(ids, dtype=np.int64)
+        print(f"[DEBUG] About to add {len(ids_array)} vectors to index")
         index.add_with_ids(batch_embeddings, ids_array)
         added += len(ids_array)
+        print(f"[DEBUG] Added {len(ids_array)} vectors, total: {added}")
         metadata_sink.write(meta_rows)
         if added % args.checkpoint_every < len(ids_array):
+            print(f"[DEBUG] Checkpointing at {added} vectors")
             faiss.write_index(index, out_path)
             print(f"[INFO] Checkpointed at {added} vectors")
 
@@ -368,21 +512,28 @@ def main() -> None:
     args = parse_args()
     index_path = os.path.join(args.out_dir, "index.faiss")
 
-    if torch.backends.mps.is_available():
-        device = "mps"
-    elif torch.cuda.is_available():
+    # Use GPU if available (Tesla M60 should work with PyTorch 1.11.0)
+    if torch.cuda.is_available():
         device = "cuda"
+        print(f"[DEBUG] Using GPU: {torch.cuda.get_device_name(0)}")
+    elif torch.backends.mps.is_available():
+        device = "mps"
+        print("[DEBUG] Using MPS (Apple Silicon)")
     else:
         device = "cpu"
+    #    print("[DEBUG] Using CPU")
     # Initialize tokenizer and model
     encoder = tiktoken.get_encoding(args.encoding)
     model = SentenceTransformer(args.model, device=device)
     print(
         f"[INFO] Model loaded: {args.model} | Device: {device} | Encoding: {args.encoding if args.use_encoding else 'words'}"
     )
+    print("[DEBUG] Model loading completed successfully")
 
     # If set to append, load the existing index. If now, train a new one.
+    print("[DEBUG] Checking if index exists and append mode")
     if args.append and os.path.exists(index_path):
+        print("[DEBUG] Loading existing index")
         index = faiss.read_index(index_path)
         try:
             # set correct index nprobe if necessary
@@ -396,19 +547,26 @@ def main() -> None:
             pass
         dim = index.d
         print(f"[INFO] Index loaded: {index_path}")
+        print(f"[DEBUG] Index dimension: {dim}")
 
     else:
+        print("[DEBUG] Building new index - calling build_index function")
         index, dim = build_index(args, model)
         print(f"[INFO] Index built: {index_path}")
+        print(f"[DEBUG] Index dimension: {dim}")
 
     # Open metadata sink
+    print("[DEBUG] Opening metadata sink")
     metadata_sink = utils.get_metadata_sink(
         args.out_dir, args.save_metadata_as, append=args.append
     )
     print(f"[INFO] Metadata sink opened: {metadata_sink.get_path()}")
 
+    print("[DEBUG] Starting add_vectors_streaming function")
     add_vectors_streaming(args, index, model, encoder, metadata_sink)
+    print("[DEBUG] add_vectors_streaming completed successfully")
 
+    print("[DEBUG] Closing metadata sink")
     metadata_sink.close()
     print(f"[INFO] Metadata sink closed.")
 

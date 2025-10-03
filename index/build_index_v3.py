@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--input", required=True)
     parser.add_argument("--out-dir", default="data")
-    parser.add_argument("--b25-out", type=str, default="bm25.pkl")
+    parser.add_argument("--bm25-out", type=str, default="bm25.pkl")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--checkpoint-every", type=int, default=2e5)
 
@@ -83,7 +83,7 @@ def parse_args() -> argparse.Namespace:
 
     # Metadata parameters
     parser.add_argument(
-        "--save-metadata-as", default="parquet", choices=["parquet", "csv", "jsonl"]
+        "--save-metadata-as", default="csv", choices=["parquet", "csv", "jsonl"]
     )
 
     args = parser.parse_args()
@@ -123,7 +123,6 @@ def embed_batches(
         vectors_list.append(vectors)
     
     if not vectors_list:
-        print("[DEBUG] No vectors generated, returning empty array")
         return np.zeros((0, 0), dtype=np.float32)
     
     # Calculate and report timing statistics
@@ -412,6 +411,7 @@ def add_vectors_streaming(
 
         # row-by-row chunking
         if args.chunk_tokens <= 0:
+            print("[DEBUG] No chunking, using row-by-row chunking")
             # no chunking
             db_ids = df["id"].astype(str).tolist()
             labels = df["label"].astype(str).tolist()
@@ -420,13 +420,7 @@ def add_vectors_streaming(
             texts = texts_list
 
             ids = [utils.make_vector_id(db_id, 0) for db_id in db_ids]
-            tokens_list = [text.split() for text in texts_list]
-            word_counts = [len(tokens) for tokens in tokens_list]
-            for v_id, toks in zip(
-                ids, tokens_list
-            ):
-                bm25_corpus.append(toks)
-                bm25_ids.append(v_id)
+            word_counts = [len(t.split()) for t in texts_list]
             meta_rows = [
                 {
                     "vector_id": v_id,

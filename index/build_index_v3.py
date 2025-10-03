@@ -420,7 +420,13 @@ def add_vectors_streaming(
             texts = texts_list
 
             ids = [utils.make_vector_id(db_id, 0) for db_id in db_ids]
-            word_counts = [len(t.split()) for t in texts_list]
+            tokens_list = [text.split() for text in texts_list]
+            word_counts = [len(tokens) for tokens in tokens_list]
+            for v_id, toks in zip(
+                ids, tokens_list
+            ):
+                bm25_corpus.append(toks)
+                bm25_ids.append(v_id)
             meta_rows = [
                 {
                     "vector_id": v_id,

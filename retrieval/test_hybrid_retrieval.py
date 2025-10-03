@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Dict, Any, List
 
 from retrieval import (
-    load_store, RetrievalConfig, hybrid_once, rrf
+    load_store, RetrievalConfig, hybrid_once, rrf, Store, load_index_v3_to_gpu
 )
 
 
@@ -22,6 +22,11 @@ def test_hybrid_basic(store, query_text: str, verbose: bool = True):
         print("\n" + "="*60)
         print("TEST: Hybrid Retrieval (Dense + Sparse)")
         print("="*60)
+        print(f"Query: '{query_text}'")
+        print(f"Store loaded: {store is not None}")
+        if store:
+            print(f"Store type: {type(store)}")
+            print(f"Store attributes: {dir(store)}")
     
     # Test different weight combinations
     weight_configs = [
@@ -31,7 +36,9 @@ def test_hybrid_basic(store, query_text: str, verbose: bool = True):
     ]
     
     for w_dense, w_lex, name in weight_configs:
-        print(f"\n--- {name} (w_dense={w_dense}, w_lex={w_lex}) ---")
+        if verbose:
+            print(f"\n--- {name} (w_dense={w_dense}, w_lex={w_lex}) ---")
+            print("Creating RetrievalConfig...")
         
         cfg = RetrievalConfig(
             k_dense=20,
@@ -44,15 +51,32 @@ def test_hybrid_basic(store, query_text: str, verbose: bool = True):
             topn=10
         )
         
+        if verbose:
+            print(f"Config created: {cfg}")
+            print("Calling hybrid_once...")
+        
         hits, qv = hybrid_once(store, query_text, cfg, label_filter=None)
+        
+        if verbose:
+            print(f"Retrieval completed. Results: {len(hits)}")
+            print(f"Query vector type: {type(qv)}")
+            if hasattr(qv, 'shape'):
+                print(f"Query vector shape: {qv.shape}")
         
         print(f"Results: {len(hits)}")
         print("Top 3 results:")
         for i, h in enumerate(hits[:3], 1):
             rrf_score = h.get('rrf', 0.0)
+            dense_score = h.get('dense_score', 0.0)
+            bm25_score = h.get('bm25_score', 0.0)
             print(f"  [{i}] RRF Score: {rrf_score:.4f}")
-            print(f"      Text: {h.get('chunk_text', '')[:80]}...")
+            if verbose:
+                print(f"      Dense Score: {dense_score:.4f}")
+                print(f"      BM25 Score: {bm25_score:.4f}")
+            print(f"      Text: {h.get('chunk_text', '')}...")
             print(f"      ID: {h.get('id', 'unknown')}")
+            if verbose:
+                print(f"      All keys: {list(h.keys())}")
     
     return hits
 
@@ -359,7 +383,12 @@ def main():
     
     # Load store
     try:
-        store = load_store(args.store)
+        if args.store in ["/StudentData/data", "/StudentData/slice"]:
+            # Use the index_v3 loader for these specific paths
+            store, index = load_index_v3_to_gpu(args.store)
+        else:
+            # Use standard loader for other paths
+            store = load_store(args.store)
         print(f"Loaded store from {args.store}")
         print(f"Store contains {len(store.chunks)} chunks")
         print(f"Embedding model: {store.meta.get('embedding_model', 'unknown')}")

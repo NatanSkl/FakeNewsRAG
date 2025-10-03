@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import List, Dict, Any, Tuple
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from rank_bm25 import BM25Okapi
+import torch
+import pandas as pd
 
 
 # Retrieval helpers
@@ -110,6 +112,95 @@ def load_store(store_dir: str = "mini_index/store") -> Store:
     index = faiss.read_index(str(out / "faiss.index"))
     emb = SentenceTransformer(meta["embedding_model"])
     return Store(emb=emb, index=index, bm25=bm25, chunks=chunks, meta=meta)
+
+
+def load_index_v3_to_gpu(store_dir: str = "/StudentData/data") -> Store:
+    """Load an index built with build_index_v3.py and move to GPU."""
+    print(f"Loading index from {store_dir}...")
+    
+    import os
+    import pandas as pd
+    
+    # Load build args
+    args_path = Path(store_dir) / "build_index_args.json"
+    with open(args_path, 'r') as f:
+        args = json.load(f)
+    
+    print(f"Model: {args['model']}")
+    print(f"Index type: {args['index_type']}")
+    
+    # Load the FAISS index
+    index_path = Path(store_dir) / "index.faiss"
+    index = faiss.read_index(str(index_path))
+    
+    print(f"Original index type: {type(index)}")
+    print(f"Index dimension: {index.d}")
+    print(f"Number of vectors: {index.ntotal}")
+    
+    # Load metadata (try CSV first, then parquet as fallback)
+    metadata_path = Path(store_dir) / "metadata.csv"
+    if metadata_path.exists():
+        print("Loading metadata from CSV...")
+        df = pd.read_csv(metadata_path)
+    else:
+        metadata_path = Path(store_dir) / "metadata.parquet"
+        print("Loading metadata from Parquet...")
+        df = pd.read_parquet(metadata_path)
+    
+    print(f"Loaded {len(df)} metadata records")
+    print(f"Index has {index.ntotal} vectors")
+    
+    # Check for mismatch
+    if len(df) != index.ntotal:
+        print(f"WARNING: Metadata records ({len(df)}) != Index vectors ({index.ntotal})")
+        print("This might cause issues. Using only the available metadata.")
+    
+    # Load the embedding model
+    emb = SentenceTransformer(args['model'])
+    
+    # Load BM25 from pickle file (like load_store does)
+    bm25_path = os.path.join(store_dir, "bm25.pkl")
+    if os.path.exists(bm25_path):
+        print(f"Loading BM25 from pickle file... {bm25_path}")
+        with open(bm25_path, "rb") as f:
+            bm25: BM25Okapi = pickle.load(f)
+    
+    """# Create metadata
+    meta = {
+        "embedding_model": args['model'],
+        "total_chunks": len(chunks),
+        "embedding_dim": index.d,
+        "index_type": args['index_type']
+    }"""
+    
+    # Create store
+    store = Store(emb=emb, index=index, bm25=bm25, chunks=None, meta=None)
+    
+    # Check if CUDA is available and move to GPU
+    if torch.cuda.is_available():
+        print("CUDA available, moving index to GPU...")
+        try:
+            # Check if we have GPU support
+            if hasattr(faiss, 'StandardGpuResources'):
+                # Get GPU resources
+                res = faiss.StandardGpuResources()
+                
+                # Move index to GPU
+                gpu_index = faiss.index_cpu_to_gpu(res, 0, store.index)
+                store.index = gpu_index
+                
+                print("✓ Successfully moved index to GPU")
+                print(f"GPU index type: {type(store.index)}")
+            else:
+                print("FAISS GPU support not available, using CPU index")
+            
+        except Exception as e:
+            print(f"Failed to move index to GPU: {e}")
+            print("Using CPU index instead")
+    else:
+        print("WARNING: CUDA not available, using CPU index")
+    
+    return store, index
 
 
 def encode(emb: SentenceTransformer, text: str) -> np.ndarray:
@@ -308,8 +399,12 @@ def hybrid_once(store: Store,
                 label_filter: str | None) -> Tuple[List[Dict[str, Any]], np.ndarray]:
     # Dense
     qv = encode(store.emb, query_text)
-    _, I = store.index.search(qv, cfg.k_dense)
+    v, I = store.index.search(qv, cfg.k_dense)
     dense_ids = I[0].tolist()
+
+    print("DEBUG: dense_ids")
+    print(v)
+    print(I)
 
     # BM25
     q_tokens = re.findall(r"\w+", query_text.lower())
@@ -330,9 +425,12 @@ def hybrid_once(store: Store,
 
     cand = sorted(fused.keys(), key=lambda i: fused[i], reverse=True)
 
-    # label pre-filter
+    # label pre-filter and bounds checking
     if label_filter:
-        cand = [i for i in cand if store.chunks[i]["label"] == label_filter]
+        cand = [i for i in cand if i < len(store.chunks) and store.chunks[i]["label"] == label_filter]
+    else:
+        # Just bounds checking
+        cand = [i for i in cand if i < len(store.chunks)]
 
     # Diversity (MMR) on the candidates
     texts = [store.chunks[i]["chunk_text"] for i in cand]
@@ -348,12 +446,17 @@ def hybrid_once(store: Store,
 
     hits: List[Dict[str, Any]] = []
     for gi in sel_global:
+        print("DEBUG: gi")
+        print(gi)
+        print(store.chunks[gi])
         h = store.chunks[gi].copy()
         h["rrf"] = fused[gi]
         h["_score"] = fused[gi]
         hits.append(h)
 
     return hits, qv[0]
+
+
 
 
 def apply_domain_cap(hits: List[Dict[str, Any]], cap: int = 2) -> List[Dict[str, Any]]:

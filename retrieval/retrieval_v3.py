@@ -12,11 +12,17 @@ import faiss
 import pandas as pd
 import re
 import tiktoken
+import numpy as np
 from pathlib import Path
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 from rank_bm25 import BM25Okapi
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+
+# Import chunking functions from build_index_v3
+import sys
+sys.path.append(str(Path(__file__).parent.parent / "index"))
+from build_index_v3 import chunk_tokens, chunk_words
 
 
 @dataclass
@@ -24,9 +30,10 @@ class Store:
     emb: SentenceTransformer
     index: Any
     bm25: Optional[BM25Okapi]
-    v2d: Dict[int, str]  # vector_id -> db_id mapping
+    v2d: Dict[int, int]  # vector_id -> db_id mapping
     original: pd.DataFrame  # Original CSV data
     json_path: str  # Path to build_index_args.json
+    ce_model: Optional[CrossEncoder] = None  # Optional cross-encoder model
 
 
 def simple_tokenizer(text: str) -> List[str]:
@@ -42,7 +49,10 @@ def create_encoding_tokenizer(encoding_name: str = "cl100k_base"):
     encoder = tiktoken.get_encoding(encoding_name)
     
     def tokenizer(text: str) -> List[str]:
-        tokens = encoder.encode(text or "")
+        # Use chunk_tokens with chunk_size=0 to get all tokens without chunking
+        chunks = chunk_tokens(text, encoder, chunk_size=0, chunk_overlap=0)
+        # Get the first (and only) chunk's tokens
+        tokens = chunks[0][1]  # chunks[0] is (text, tokens), we want the tokens
         return [str(token) for token in tokens]
     
     return tokenizer
@@ -51,7 +61,10 @@ def create_encoding_tokenizer(encoding_name: str = "cl100k_base"):
 def create_words_tokenizer():
     """Create tokenizer that matches chunk_words function from build_index_v3.py"""
     def tokenizer(text: str) -> List[str]:
-        words = text.split()
+        # Use chunk_words with chunk_size=0 to get all words without chunking
+        chunks = chunk_words(text, chunk_size=0, chunk_overlap=0)
+        # Get the first (and only) chunk's words
+        words = chunks[0][1]  # chunks[0] is (text, words), we want the words
         return [str(word) for word in words]
     
     return tokenizer
@@ -81,13 +94,14 @@ def get_appropriate_tokenizer(store: Store) -> callable:
         return create_words_tokenizer()
 
 
-def load_store(store_dir: str, verbose: bool = False) -> Store:
+def load_store(store_dir: str, verbose: bool = False, ce_model_name: Optional[str] = None) -> Store:
     """
     Load a store built with build_index_v3.py.
     
     Args:
         store_dir: Directory containing the index files
         verbose: If True, print progress information for each step
+        ce_model_name: Optional cross-encoder model name to load (e.g., "cross-encoder/ms-marco-MiniLM-L-6-v2")
         
     Returns:
         Store object with loaded components
@@ -163,7 +177,7 @@ def load_store(store_dir: str, verbose: bool = False) -> Store:
         raise FileNotFoundError(f"metadata.csv not found in {store_dir}")
     
     df_meta = pd.read_csv(metadata_path)
-    v2d = {int(row["vector_id"]): str(row["db_id"]) for _, row in df_meta.iterrows()}
+    v2d = {int(row["vector_id"]): int(row["db_id"]) for _, row in df_meta.iterrows()}
     
     if verbose:
         print(f"Metadata loaded: {len(v2d)} vector_id -> db_id mappings")
@@ -181,8 +195,26 @@ def load_store(store_dir: str, verbose: bool = False) -> Store:
     if verbose:
         print(f"Original CSV loaded: {original.shape[0]} rows, {original.shape[1]} columns")
     
+    # Load cross-encoder model (optional)
     if verbose:
-        print("Step 8: Creating Store object...")
+        print("Step 8: Loading cross-encoder model (optional)...")
+    
+    ce_model = None
+    if ce_model_name:
+        try:
+            ce_model = CrossEncoder(ce_model_name)
+            if verbose:
+                print(f"Cross-encoder model loaded: {ce_model_name}")
+        except Exception as e:
+            if verbose:
+                print(f"Failed to load cross-encoder model {ce_model_name}: {e}")
+            ce_model = None
+    else:
+        if verbose:
+            print("No cross-encoder model specified, skipping")
+    
+    if verbose:
+        print("Step 9: Creating Store object...")
     
     store = Store(
         emb=emb,
@@ -190,7 +222,8 @@ def load_store(store_dir: str, verbose: bool = False) -> Store:
         bm25=bm25,
         v2d=v2d,
         original=original,
-        json_path=str(args_path)
+        json_path=str(args_path),
+        ce_model=ce_model
     )
     
     if verbose:
@@ -214,6 +247,146 @@ def embed_and_normalize(texts, model):
     # If you didn't normalize at add time, normalize here:
     # faiss.normalize_L2(X)  # normalize in-place
     return X.astype(np.float32)
+
+
+# TODO copy with adjustments cross_encoder_rerank from for cross-encoder/ms-marco-MiniLM-L-6-v2, castorini/monot5-base-msmarco
+# TODO copy diversify with mmr, xquad
+# TODO create retrieve_evidence
+
+
+def deduplicate(results: List[Dict[str, Any]], score_key: str = "score") -> List[Dict[str, Any]]:
+    """
+    Remove duplicate db_id entries from results, keeping only the one with the highest score.
+    
+    Args:
+        results: List of result dictionaries
+        score_key: Key to use for score comparison (default: "score")
+        
+    Returns:
+        List of deduplicated results, sorted by score (highest first)
+    """
+    if not results:
+        return results
+    
+    # Group results by db_id
+    db_id_groups = {}
+    for result in results:
+        db_id = result.get("db_id")
+        if db_id is not None:
+            if db_id not in db_id_groups:
+                db_id_groups[db_id] = []
+            db_id_groups[db_id].append(result)
+    
+    # For each db_id group, keep only the result with the highest score
+    deduplicated = []
+    for db_id, group in db_id_groups.items():
+        if len(group) == 1:
+            # Only one result for this db_id, keep it
+            deduplicated.append(group[0])
+        else:
+            # Multiple results for this db_id, keep the one with highest score
+            best_result = max(group, key=lambda x: x.get(score_key, float('-inf')))
+            deduplicated.append(best_result)
+    
+    # Sort by score (highest first)
+    deduplicated.sort(key=lambda x: x.get(score_key, float('-inf')), reverse=True)
+    
+    return deduplicated
+
+
+def base_score(result: dict) -> float:
+    """Extract base score from result dictionary."""
+    return result.get("score", result.get("hybrid_score", result.get("_score", 0.0)))
+
+
+def cross_encoder_rerank(
+    cross_enc,
+    query_text: str,
+    results: list[dict],
+    ce_topk: int = 200,
+    ce_weight: float = 1.0,
+    batch_size: int = 32,
+    norm: str = "minmax",        # or "zscore" / "logistic"
+    content_key: str = "content" # where the passage text lives
+) -> list[dict]:
+    """
+    Rerank results with a cross-encoder, blending CE into a unified _score,
+    and globally resorting the whole list.
+    """
+    if not results or cross_enc is None:
+        return results
+
+    # Keep stable order for ties
+    ordered = sorted(results, key=base_score, reverse=True)
+    head = ordered[:min(ce_topk, len(ordered))]
+    tail = ordered[len(head):]
+
+    # 2) Build query-passage pairs
+    pairs = [(query_text, h.get(content_key, "")) for h in head]
+
+    try:
+        # TODO utilize gpu?
+        ce_scores = cross_enc.predict(
+            pairs,
+            batch_size=batch_size,
+            show_progress_bar=False,
+            convert_to_numpy=True
+        ).tolist()
+    except Exception:
+        # If CE fails, just return the original ordering
+        return ordered
+
+    # 3) Normalize CE scores
+    arr = np.array(ce_scores, dtype=float)
+    mu, sd = float(arr.mean()), float(arr.std() or 1e-6)
+    zscores = [(s - mu) / sd for s in arr]
+    norm_scores = zscores
+
+    # 4) Blend and write unified scores
+    for res, ns, raw in zip(head, norm_scores, ce_scores):
+        res["ce_score"] = float(raw)
+        res["base_score"] = res.get("score", 0.0)  # optional for debugging
+        res["score"] = res["base_score"] + ce_weight * float(ns)
+
+    # 5) Global sort (head + tail) by unified _score
+    # Tail items keep their original _score/base_score
+    #combined = head + tail
+    combined = head
+    combined.sort(key=lambda r: r.get("_score", base_score(r)), reverse=True)
+    return combined
+
+
+def get_data_from_vector_id(store: Store, vector_id: int) -> Optional[Dict[str, Any]]:
+    """
+    Get data from a vector_id using the store's mappings.
+    
+    Args:
+        store: Store object containing mappings and data
+        vector_id: The vector ID to look up
+        
+    Returns:
+        Dictionary with metadata for the vector_id, or None if not found
+    """
+    # Get db_id from v2d mapping
+    db_id = store.v2d.get(int(vector_id))
+    if not db_id:
+        return None
+        
+    # Find the row in original data with matching db_id
+    matching_rows = store.original[store.original['id'] == int(db_id)]
+    if matching_rows.empty:
+        return None
+        
+    row = matching_rows.iloc[0]
+    return {
+        "vector_id": int(vector_id),
+        "db_id": db_id,
+        "chunk_id": 0,  # Default chunk_id since we don't have chunking info in original
+        "label": row['label'],
+        "title": row['title'],
+        "content": row['content'],
+        "token_count": len(row['content'].split()) if pd.notna(row['content']) else 0,
+    }
 
 
 def query_once(store: Store, query: str, k: int = 10, nprobe: int = 16):
@@ -244,26 +417,12 @@ def query_once(store: Store, query: str, k: int = 10, nprobe: int = 16):
         if vid == -1:
             continue  # no hit
         
-        # Get db_id from v2d mapping
-        db_id = store.v2d.get(int(vid))
-        if not db_id:
-            continue
+        # Get data from vector_id using the extracted function
+        data = get_data_from_vector_id(store, int(vid))
             
-        # Find the row in original data with matching db_id
-        matching_rows = store.original[store.original['id'] == int(db_id)]
-        if matching_rows.empty:
-            continue
-            
-        row = matching_rows.iloc[0]
         results.append({
-            "score": float(d),             # inner product; higher is better
-            "vector_id": int(vid),
-            "db_id": db_id,
-            "chunk_id": 0,  # Default chunk_id since we don't have chunking info in original
-            "label": row['label'],
-            "title": row['title'],
-            "content": row['content'],
-            "token_count": len(row['content'].split()) if pd.notna(row['content']) else 0,
+            "score": float(d),  # inner product; higher is better
+            **data
         })
     return results
 
@@ -313,15 +472,20 @@ def hybrid_query(
     # pick top document indices from BM25
     top_bm25_idxs = np.argsort(bm25_scores_array)[::-1][:k_bm]
     bm25_scores = {}
+    
+    # TODO optimize, create these once in load_store
+    v2d_len = len(store.v2d)
+    v2d_list = list(store.v2d.keys())
+    
     for doc_idx in top_bm25_idxs:
         # We need to map doc_idx to vector_id
         # Since BM25 was built with the same order as the index, we can use the v2d mapping
         # But we need to find the vector_id that corresponds to this doc_idx
         # This is a bit tricky - we need to find which vector_id maps to this document position
         # For now, let's assume the BM25 corpus order matches the vector order
-        if doc_idx < len(store.v2d):
+        if doc_idx < v2d_len:
             # Get the vector_id at this position (assuming order is preserved)
-            vector_id = list(store.v2d.keys())[doc_idx]
+            vector_id = v2d_list[doc_idx]
             bm25_scores[int(vector_id)] = float(bm25_scores_array[doc_idx])
 
     # Normalize each score type to [0,1]
@@ -335,34 +499,16 @@ def hybrid_query(
         norm_bm = bm25_scores.get(vid, 0.0) / max_bm
         hybrid_score = alpha * norm_fa + (1 - alpha) * norm_bm
         
-        # Get metadata for this vector_id
-        db_id = store.v2d.get(int(vid))
-        if not db_id:
-            continue
-            
-        # Find the row in original data with matching db_id
-        matching_rows = store.original[store.original['id'] == int(db_id)]
-        if matching_rows.empty:
-            continue
-            
-        row = matching_rows.iloc[0]
-        meta = {
-            "vector_id": int(vid),
-            "db_id": db_id,
-            "chunk_id": 0,  # Default chunk_id since we don't have chunking info in original
-            "label": row['label'],
-            "title": row['title'],
-            "content": row['content'],
-            "token_count": len(row['content'].split()) if pd.notna(row['content']) else 0,
-        }
+        # Get data from vector_id using the extracted function
+        data = get_data_from_vector_id(store, int(vid))
         
         results.append({
-            "hybrid_score": hybrid_score,
+            "score": hybrid_score,
             "faiss_score": faiss_scores.get(vid, 0.0),
             "bm25_score": bm25_scores.get(vid, 0.0),
-            **meta
+            **data
         })
 
-    results.sort(key=lambda x: x["hybrid_score"], reverse=True)
+    results.sort(key=lambda x: x["score"], reverse=True)
     return results[:k]
 

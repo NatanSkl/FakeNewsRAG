@@ -48,6 +48,7 @@ def _trim(s: str, max_chars: int) -> str:
 
 
 # ----------------------------- prompting -----------------------------
+# TODO test cases of [General summary, Fake news detection summary, etc]
 SUMMARY_SYSTEM = (
     "You are a careful fact-focused assistant. Summarize EVIDENCE in relation to the QUERY. "
     "Quote short spans from evidence with (chunk_id) markers. If evidence is insufficient, say so."

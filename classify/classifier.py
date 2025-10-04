@@ -21,6 +21,7 @@ class ClassificationResult:
     raw_response: str  # raw LLM response
 
 
+# TODO test cases of different personalities / instructions / level of detail
 # Classification prompt templates
 CLASSIFICATION_SYSTEM = (
     "You are an expert fact-checker and news analyst. Your task is to determine whether "

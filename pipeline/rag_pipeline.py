@@ -34,10 +34,39 @@ def _get_timestamp() -> str:
     return dt.datetime.now().strftime("%H:%M")
 
 
+def classify_article_rag_dummy(
+    article_title: str,
+    article_content: str,
+    reranking_type: str = None,
+    diversify_type: str = None,
+    *,
+    store_dir: str = "mini_index/store",
+    llm: LocalLLM,
+    retrieval_config: RetrievalConfig | None = None,
+    verbose: bool = False
+) -> RAGOutput:
+    classification = ClassificationResult(
+        prediction="fake",
+        confidence=1.0,
+        reasoning="<dummy reasoning>",
+        raw_response="<dummy raw response>"
+    )
+    return RAGOutput(
+        classification=classification,
+        fake_summary="<dummy fake summary>  ",
+        reliable_summary="<dummy reliable summary>",
+        fake_evidence="<dummy fake evidence>",
+        reliable_evidence="<dummy reliable evidence>",
+        retrieval_config=None
+    )
+
+
 def classify_article_rag(
     article_title: str,
     article_content: str,
     *,
+    reranking_type: str = None,
+    diversify_type: str = None,
     store_dir: str = "mini_index/store",
     llm: LocalLLM,
     retrieval_config: RetrievalConfig | None = None,

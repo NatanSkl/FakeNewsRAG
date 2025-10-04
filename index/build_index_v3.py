@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--input", required=True)
     parser.add_argument("--out-dir", default="data")
-    parser.add_argument("--bm25-out", type=str, default="bm25.pkl")
+    parser.add_argument("--b25-out", type=str, default="bm25.pkl")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--checkpoint-every", type=int, default=2e5)
 
@@ -83,7 +83,7 @@ def parse_args() -> argparse.Namespace:
 
     # Metadata parameters
     parser.add_argument(
-        "--save-metadata-as", default="csv", choices=["parquet", "csv", "jsonl"]
+        "--save-metadata-as", default="parquet", choices=["parquet", "csv", "jsonl"]
     )
 
     args = parser.parse_args()
@@ -94,17 +94,19 @@ def parse_args() -> argparse.Namespace:
 def embed_batches(
     texts: List[str], model: SentenceTransformer, batch_size: int, normalize: bool
 ) -> np.ndarray:
-    print(f"[DEBUG] embed_batches called with {len(texts)} texts, batch_size={batch_size}")
+    print(
+        f"[DEBUG] embed_batches called with {len(texts)} texts, batch_size={batch_size}"
+    )
     vectors_list: List[np.ndarray] = []
     encode_times = []
-    
+
     for i in range(0, len(texts), batch_size):
         batch = texts[i : i + batch_size]
         if not batch:
             continue
         print(f"[DEBUG] Processing batch {i//batch_size + 1} with {len(batch)} texts")
         print(f"[DEBUG] About to call model.encode()")
-        
+
         # Time the model.encode() call
         start_time = time.time()
         vectors = model.encode(
@@ -115,16 +117,19 @@ def embed_batches(
             normalize_embeddings=normalize,
         ).astype(np.float32)
         end_time = time.time()
-        
+
         encode_time = end_time - start_time
         encode_times.append(encode_time)
-        
-        print(f"[DEBUG] model.encode() completed in {encode_time:.3f}s, shape: {vectors.shape}")
+
+        print(
+            f"[DEBUG] model.encode() completed in {encode_time:.3f}s, shape: {vectors.shape}"
+        )
         vectors_list.append(vectors)
-    
+
     if not vectors_list:
+        print("[DEBUG] No vectors generated, returning empty array")
         return np.zeros((0, 0), dtype=np.float32)
-    
+
     # Calculate and report timing statistics
     if encode_times:
         avg_time = sum(encode_times) / len(encode_times)
@@ -135,7 +140,7 @@ def embed_batches(
         print(f"[TIMING]   - Total encoding time: {total_time:.3f}s")
         print(f"[TIMING]   - Min time: {min(encode_times):.3f}s")
         print(f"[TIMING]   - Max time: {max(encode_times):.3f}s")
-    
+
     result = np.vstack(vectors_list)
     print(f"[DEBUG] Final embeddings shape: {result.shape}")
     return result
@@ -164,7 +169,7 @@ def make_index_gpu(dim: int, args) -> faiss.Index:
     # helper to configure multi-GPU cloning
     def _multi_opts():
         co = faiss.GpuMultipleClonerOptions()
-        co.shard = bool(getattr(args, "shard", False))      # shard or replicate
+        co.shard = bool(getattr(args, "shard", False))  # shard or replicate
         co.useFloat16 = bool(getattr(args, "use_float16", True))
         # co.usePrecomputed = True  # enable if you precompute PQ tables
         return co
@@ -197,7 +202,9 @@ def make_index_gpu(dim: int, args) -> faiss.Index:
     # ---------- IVFPQ ----------
     if args.index_type.startswith("IVFPQ"):
         quantizer = faiss.IndexFlatIP(dim) if use_ip else faiss.IndexFlatL2(dim)
-        cpu_index = faiss.IndexIVFPQ(quantizer, dim, args.nlist, args.pq_m, args.pq_bits, metric)
+        cpu_index = faiss.IndexIVFPQ(
+            quantizer, dim, args.nlist, args.pq_m, args.pq_bits, metric
+        )
         if ngpu > 0:
             print("Faiss GPU is available")
             if ngpu == 1:
@@ -216,7 +223,6 @@ def make_index_gpu(dim: int, args) -> faiss.Index:
             return faiss.IndexHNSWFlat(dim, m, faiss.METRIC_L2)
 
     raise ValueError(f"[ERROR] Unsupported index type: {args.index_type}")
-
 
 
 def make_index(dim: int, args: argparse.Namespace) -> faiss.Index:
@@ -254,7 +260,9 @@ def infer_dim(args: argparse.Namespace, model: SentenceTransformer) -> int:
             print("[DEBUG] No texts in chunk for dimension inference, skipping")
             continue
         batch = texts[: min(len(texts), args.batch_size)]
-        print(f"[DEBUG] About to embed batch of {len(batch)} texts for dimension inference")
+        print(
+            f"[DEBUG] About to embed batch of {len(batch)} texts for dimension inference"
+        )
         batch_embeddings = embed_batches(batch, model, args.batch_size, args.normalize)
         if batch_embeddings.size > 0:
             dim = int(batch_embeddings.shape[1])
@@ -391,6 +399,7 @@ def add_vectors_streaming(
 ) -> None:
     print("[DEBUG] add_vectors_streaming function started")
     added = 0
+    counter = [0]
     out_path = os.path.join(args.out_dir, "index.faiss")
 
     bm25_corpus: List[List[str]] = []
@@ -408,44 +417,28 @@ def add_vectors_streaming(
             df["title"].astype(str) + "\n" + df["content"].astype(str)
         ).tolist()
         print(f"[DEBUG] Generated {len(texts_list)} texts from chunk")
+        vid_to_dbid = {}
 
         # row-by-row chunking
         if args.chunk_tokens <= 0:
-            print("[DEBUG] No chunking, using row-by-row chunking")
             # no chunking
             db_ids = df["id"].astype(str).tolist()
-            labels = df["label"].astype(str).tolist()
-            titles = df["title"].astype(str).tolist()
-            contents = df["content"].astype(str).tolist()
             texts = texts_list
 
-            ids = [utils.make_vector_id(db_id, 0) for db_id in db_ids]
-            word_counts = [len(t.split()) for t in texts_list]
-            meta_rows = [
-                {
-                    "vector_id": v_id,
-                    "db_id": db_id,
-                    "chunk_id": 0,
-                    "label": l,
-                    "title": t,
-                    "content": c,
-                    "token_count": wc,
-                }
-                for v_id, db_id, l, t, c, wc in zip(
-                    ids, db_ids, labels, titles, contents, word_counts
-                )
-            ]
+            v_ids = [utils.make_vector_id(db_id, counter) for db_id in db_ids]
+            tokens_list = [text.split() for text in texts_list]
+            for v_id, db_id, toks in zip(v_ids, db_ids, tokens_list):
+                bm25_corpus.append(toks)
+                bm25_ids.append(v_id)
+                vid_to_dbid[v_id] = db_id
+
         else:
             # chunk the text of articles based on words / tokens
             texts: List[str] = []
-            ids: List[np.int64] = []
-            meta_rows: List[Dict[str, Any]] = []
+            v_ids: List[int] = []
 
-            for db_id, label, title, content, text in zip(
+            for db_id, text in zip(
                 df["id"].astype(str).tolist(),
-                df["label"].astype(str).tolist(),
-                df["title"].astype(str).tolist(),
-                df["content"].astype(str).tolist(),
                 texts_list,
             ):
                 if args.use_encoding:
@@ -459,24 +452,11 @@ def add_vectors_streaming(
                 for chunk_id, (chunk_text, tokens) in enumerate(chunks_tuples):
                     if not chunk_text.strip():
                         continue
-                    v_id = utils.make_vector_id(db_id, chunk_id)
-                    ids.append(v_id)
                     texts.append(chunk_text)
-                    meta_rows.append(
-                        {
-                            "vector_id": v_id,
-                            "db_id": db_id,
-                            "chunk_id": chunk_id,
-                            "label": label,
-                            "title": title,
-                            "content": content,
-                            "token_count": len(tokens),
-                        }
-                    )
-                    if args.use_encoding:
-                        bm25_corpus.append([str(token) for token in tokens])
-                    else:
-                        bm25_corpus.append(tokens)
+                    v_id = utils.make_vector_id(db_id, counter)
+                    v_ids.append(v_id)
+                    vid_to_dbid[v_id] = db_id
+                    bm25_corpus.append([str(token) for token in tokens])
                     bm25_ids.append(v_id)
 
         if not texts:
@@ -486,12 +466,12 @@ def add_vectors_streaming(
         print(f"[DEBUG] About to embed {len(texts)} texts")
         batch_embeddings = embed_batches(texts, model, args.batch_size, args.normalize)
         print(f"[DEBUG] Embeddings generated, shape: {batch_embeddings.shape}")
-        ids_array = np.array(ids, dtype=np.int64)
+        ids_array = np.array(v_ids, dtype=int)
         print(f"[DEBUG] About to add {len(ids_array)} vectors to index")
         index.add_with_ids(batch_embeddings, ids_array)
         added += len(ids_array)
         print(f"[DEBUG] Added {len(ids_array)} vectors, total: {added}")
-        metadata_sink.write(meta_rows)
+        metadata_sink.write(vid_to_dbid)
         if added % args.checkpoint_every < len(ids_array):
             print(f"[DEBUG] Checkpointing at {added} vectors")
             faiss.write_index(index, out_path)

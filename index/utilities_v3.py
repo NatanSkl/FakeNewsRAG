@@ -1,3 +1,4 @@
+import csv
 import os
 import json
 from typing import Any, List, Iterable, Dict
@@ -47,29 +48,16 @@ def save_args(args: argparse.Namespace, path: str, file: str) -> None:
         json.dump(args_dict, f, ensure_ascii=False, indent=4)
 
 
-def _hash64(text: str) -> np.int64:
-    h = np.int64(1469598103934665603)
-    for char in text.encode("utf-8"):
-        h = np.int64(h ^ np.int64(char))
-        h = np.int64(h * np.int64(1099511628211))
-    return h
-
-
-def make_vector_id(db_id: str, chunk_id: int) -> np.int64:
-    try:
-        base = np.int64(int(db_id))
-        return np.int64((base << 16) | (chunk_id & 0xFFFF))
-    except Exception:
-        base = _hash64(str(db_id))
-        return np.int64(base ^ np.int64(chunk_id & 0xFFFF))
-
+def make_vector_id(db_id:str, counter: List[int]) -> int:
+    counter[0] += 1
+    return counter[0]
 
 class MetadataSink:
     def __init__(self, path: str, append: bool = False) -> None:
         self.path = path
         self.append = append
 
-    def write(self, rows: List[Dict[str, Any]]) -> None:
+    def write(self, rows: dict) -> None:
         raise NotImplementedError
 
     def close(self) -> None:
@@ -113,12 +101,15 @@ class CSVSink(MetadataSink):
         if append and os.path.exists(self.path):
             self.header_written = True
 
-    def write(self, rows: List[Dict[str, Any]]) -> None:
+    def write(self, rows: dict) -> None:
         if not rows:
             return
-        df = pd.DataFrame(rows)
-        df.to_csv(self.path, mode="a", header=not self.header_written, index=False)
-        self.header_written = True
+        with open (self.path, "a", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, rows[0].keys())
+            if not self.header_written:
+                writer.writeheader()
+                self.header_written = True
+            writer.writerows(rows)
 
     def close(self) -> None:
         pass

@@ -105,11 +105,12 @@ class CSVSink(MetadataSink):
         if not rows:
             return
         with open (self.path, "a", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, rows[0].keys())
+            writer = csv.DictWriter(f, ["vector_id", "db_id"])
             if not self.header_written:
                 writer.writeheader()
                 self.header_written = True
-            writer.writerows(rows)
+            dict_rows = [{"vector_id": k, "db_id": v} for k, v in rows.items()]
+            writer.writerows(dict_rows)
 
     def close(self) -> None:
         pass

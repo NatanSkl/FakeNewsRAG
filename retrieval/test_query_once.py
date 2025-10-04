@@ -13,29 +13,24 @@ import pandas as pd
 from pathlib import Path
 from sentence_transformers import SentenceTransformer
 
-from retrieval_v3 import query_once, embed_and_normalize
+from retrieval_v3 import query_once, embed_and_normalize, load_store
 
 
-def load_real_index(store_dir="/StudentData/slice"):
-    """Load the real index from /StudentData/slice."""
-    print(f"Loading real index from {store_dir}...")
+def load_real_store(store_dir="/StudentData/slice"):
+    """Load the real store from the specified directory."""
+    print(f"Loading real store from {store_dir}...")
     
-    # Load the FAISS index
-    index_path = Path(store_dir) / "index.faiss"
-    index = faiss.read_index(str(index_path))
+    # Load the store using load_store function
+    store = load_store(store_dir, verbose=True)
     
-    # Create args dict
-    args = {
-        "out_dir": store_dir,
-        "model": "sentence-transformers/all-MiniLM-L6-v2",
-        "nprobe": 32  # Use appropriate nprobe for IVF index
-    }
+    print(f"Loaded store with {store.index.ntotal} vectors")
+    print(f"Index type: {type(store.index)}")
+    print(f"Index dimension: {store.index.d}")
+    print(f"BM25 available: {store.bm25 is not None}")
+    print(f"v2d mappings: {len(store.v2d)}")
+    print(f"Original data shape: {store.original.shape}")
     
-    print(f"Loaded index with {index.ntotal} vectors")
-    print(f"Index type: {type(index)}")
-    print(f"Index dimension: {index.d}")
-    
-    return index, args
+    return store
 
 
 def test_query_once_basic():
@@ -44,8 +39,8 @@ def test_query_once_basic():
     print("TEST: Basic query_once functionality")
     print("="*60)
     
-    # Load real index
-    index, args = load_real_index("/StudentData/slice")
+    # Load real store
+    store = load_real_store("/StudentData/slice")
     
     # Test queries
     test_queries = [
@@ -113,7 +108,7 @@ James Elder, spokesman for the UN children's agency, Unicef, said on Friday that
         print("-" * 40)
         
         try:
-            results = query_once(index, query, args, k=5)
+            results = query_once(store, query, k=5)
             
             print(f"Found {len(results)} results:")
             for i, result in enumerate(results, 1):

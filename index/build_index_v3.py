@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--input", required=True)
     parser.add_argument("--out-dir", default="data")
-    parser.add_argument("--b25-out", type=str, default="bm25.pkl")
+    parser.add_argument("--bm25-out", type=str, default="bm25.pkl")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--checkpoint-every", type=int, default=2e5)
 

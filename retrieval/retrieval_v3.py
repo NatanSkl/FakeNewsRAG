@@ -293,6 +293,347 @@ def deduplicate(results: List[Dict[str, Any]], score_key: str = "score") -> List
     
     return deduplicated
 
+# ----------------------------
+# Utility helpers
+# ----------------------------
+
+def _normalize_scores(d: Dict[int, float]) -> Dict[int, float]:
+    """Robust 0–1 normalization that also handles zeros/negatives."""
+    if not d:
+        return {}
+    mx = max(d.values())
+    if mx <= 0:
+        mn = min(d.values())
+        rng = mx - mn if mx != mn else 1.0
+        return {k: (v - mn) / rng for k, v in d.items()}
+    return {k: v / mx for k, v in d.items()}
+
+def _v2d_list(store: Store) -> List[int]:
+    """Stable vector_id list used to align BM25 corpus order with vector_ids."""
+    return list(store.v2d.keys())
+
+def _bm25_scores_for_query(store: Store, query: str, tokenizer_fn) -> Dict[int, float]:
+    """
+    Return BM25 scores as {vector_id: score}.
+    Assumes BM25 corpus order == order of list(store.v2d.keys()) from build step.
+    """
+    if store.bm25 is None:
+        return {}
+    q_tokens = tokenizer_fn(query)
+    arr = store.bm25.get_scores(q_tokens)
+    vlist = _v2d_list(store)
+    n = min(len(arr), len(vlist))
+    return {int(vlist[i]): float(arr[i]) for i in range(n)}
+
+def _embed_texts_norm(model: SentenceTransformer, texts: List[str]) -> np.ndarray:
+    X = model.encode(texts, convert_to_numpy=True, normalize_embeddings=True)
+    return X.astype(np.float32)
+
+def _cos_sim_matrix(A: np.ndarray, B: np.ndarray) -> np.ndarray:
+    """Cosine similarity for L2-normalized rows (dot product)."""
+    return A @ B.T
+
+def _default_aspects_from_query(query: str, max_aspects: int = 4) -> List[str]:
+    """Very light heuristic for xQuAD aspects when none are provided."""
+    toks = re.findall(r"[A-Za-z0-9\-]+", query.lower())
+    uniq = []
+    for t in toks:
+        if len(t) >= 4 and t not in uniq:
+            uniq.append(t)
+        if len(uniq) >= max_aspects:
+            break
+    return uniq or [query]
+
+# ----------------------------
+# MMR diversity re-ranking
+# ----------------------------
+
+def mmr_diversify(
+    store: Store,
+    query_text: str,
+    results: List[Dict[str, Any]],
+    top_k: int,
+    lambda_mmr: float = 0.5,
+    content_key: str = "content",
+) -> List[Dict[str, Any]]:
+    """
+    Maximal Marginal Relevance selection over the candidate results.
+    score(d) = λ * sim(q,d) - (1-λ) * max_{s in S} sim(d,s)
+    """
+    if not results:
+        return results
+
+    cand_texts = [r.get(content_key, "") or "" for r in results]
+    doc_embs = _embed_texts_norm(store.emb, cand_texts)     # (N, d)
+    q_emb = _embed_texts_norm(store.emb, [query_text])[0:1] # (1, d)
+
+    q2d = _cos_sim_matrix(q_emb, doc_embs)[0]  # (N,)
+    d2d = _cos_sim_matrix(doc_embs, doc_embs)  # (N, N)
+
+    selected: List[int] = []
+    remaining = set(range(len(results)))
+
+    while len(selected) < min(top_k, len(results)):
+        best_idx, best_score = None, -1e9
+        for i in remaining:
+            if not selected:
+                score = lambda_mmr * float(q2d[i])
+            else:
+                max_sim = float(np.max(d2d[i, selected]))
+                score = lambda_mmr * float(q2d[i]) - (1.0 - lambda_mmr) * max_sim
+            if score > best_score:
+                best_score, best_idx = score, i
+        selected.append(best_idx)
+        remaining.remove(best_idx)
+
+    out = []
+    for rank, idx in enumerate(selected):
+        item = dict(results[idx])
+        item["mmr_rank"] = rank + 1
+        out.append(item)
+    return out
+# ----------------------------
+# xQuAD diversity re-ranking
+# ----------------------------
+
+def xquad_diversify(
+    store: Store,
+    query_text: str,
+    results: List[Dict[str, Any]],
+    top_k: int,
+    aspects: Optional[List[str]] = None,
+    alpha: float = 0.7,
+    beta: float = 0.3,
+    content_key: str = "content",
+    tokenizer_fn = None
+) -> List[Dict[str, Any]]:
+    """
+    xQuAD-style selection:
+      score(d) = α * P(d|q) + (1-α) * Σ_i [ (1 - C_i(S)) * P(d|a_i) ]
+    where C_i(S) = β * max_{s∈S} P(s|a_i), P(d|q) = normalized base 'score',
+    P(d|a_i) from BM25 (normalized).
+    """
+    if not results:
+        return results
+
+    if tokenizer_fn is None:
+        tokenizer_fn = get_appropriate_tokenizer(store)
+
+    aspects = aspects or _default_aspects_from_query(query_text)
+
+    # Base relevance from 'score' (already hybrid); normalize
+    vid_list = [int(r["vector_id"]) for r in results if r.get("vector_id") is not None]
+    base_rel = {int(r["vector_id"]): float(r.get("score", 0.0)) for r in results if r.get("vector_id") is not None}
+    base_rel = _normalize_scores(base_rel)
+
+    # Aspect relevances via BM25
+    if store.bm25 is not None:
+        aspect_rel: Dict[str, Dict[int, float]] = {
+            a: _normalize_scores(_bm25_scores_for_query(store, a, tokenizer_fn)) for a in aspects
+        }
+    else:
+        aspect_rel = {a: {} for a in aspects}
+
+    selected: List[int] = []
+    selected_vids: List[int] = []
+    remaining = list(range(len(results)))
+    vector_ids = [int(r.get("vector_id") or -1) for r in results]
+
+    while len(selected) < min(top_k, len(results)):
+        # Coverage now
+        coverage = {
+            a: 0.0 if not selected_vids else beta * max(aspect_rel.get(a, {}).get(vid, 0.0) for vid in selected_vids)
+            for a in aspects
+        }
+        best_idx, best_score = None, -1e9
+
+        for i in remaining:
+            vid = vector_ids[i]
+            rel_q = base_rel.get(vid, 0.0)
+            div_bonus = 0.0
+            for a in aspects:
+                p_da = aspect_rel.get(a, {}).get(vid, 0.0)
+                div_bonus += (1.0 - coverage[a]) * p_da
+            xq = alpha * rel_q + (1.0 - alpha) * div_bonus
+            if xq > best_score:
+                best_score, best_idx = xq, i
+
+        selected.append(best_idx)
+        selected_vids.append(vector_ids[best_idx])
+        remaining.remove(best_idx)
+
+    out = []
+    for rank, idx in enumerate(selected):
+        item = dict(results[idx])
+        item["xquad_rank"] = rank + 1
+        item["xquad_aspects"] = aspects
+        out.append(item)
+    return out
+# ----------------------------
+# Combine MMR and xQuAD
+# ----------------------------
+
+def diversify_mmr_xquad(
+    store: Store,
+    query_text: str,
+    results: List[Dict[str, Any]],
+    top_k: int,
+    *,
+    mode: str = "sequential",       # "sequential" | "blended"
+    order: str = "mmr->xquad",      # used when mode == "sequential"
+    mmr_lambda: float = 0.5,
+    xquad_alpha: float = 0.7,
+    xquad_beta: float = 0.3,
+    xquad_aspects: Optional[List[str]] = None,
+    tokenizer_fn = None,
+    content_key: str = "content",
+    gamma: float = 0.5              # used when mode == "blended"
+) -> List[Dict[str, Any]]:
+    """Apply both MMR and xQuAD on deduped results."""
+    if not results:
+        return results
+
+    # Dedup first to enforce diversity across articles
+    results = deduplicate(results, score_key="score")
+
+    if mode == "sequential":
+        pool = min(len(results), max(top_k * 3, 30))
+        if order.lower() == "mmr->xquad":
+            stage1 = mmr_diversify(
+                store, query_text, results[:pool], top_k=pool,
+                lambda_mmr=mmr_lambda, content_key=content_key
+            )
+            return xquad_diversify(
+                store, query_text, stage1, top_k=top_k,
+                aspects=xquad_aspects, alpha=xquad_alpha, beta=xquad_beta,
+                content_key=content_key, tokenizer_fn=tokenizer_fn
+            )
+        else:  # xquad->mmr
+            stage1 = xquad_diversify(
+                store, query_text, results[:pool], top_k=pool,
+                aspects=xquad_aspects, alpha=xquad_alpha, beta=xquad_beta,
+                content_key=content_key, tokenizer_fn=tokenizer_fn
+            )
+            return mmr_diversify(
+                store, query_text, stage1, top_k=top_k,
+                lambda_mmr=mmr_lambda, content_key=content_key
+            )
+
+    # ---------- blended ----------
+    if tokenizer_fn is None:
+        tokenizer_fn = get_appropriate_tokenizer(store)
+
+    # Precompute for MMR
+    cand_texts = [r.get(content_key, "") or "" for r in results]
+    doc_embs = _embed_texts_norm(store.emb, cand_texts)
+    q_emb = _embed_texts_norm(store.emb, [query_text])[0:1]
+    q2d = (q_emb @ doc_embs.T)[0]
+    d2d = doc_embs @ doc_embs.T
+
+    # Base relevance for xQuAD
+    vector_ids = [int(r.get("vector_id") or -1) for r in results]
+    base_rel = {int(r["vector_id"]): float(r.get("score", 0.0)) for r in results if r.get("vector_id") is not None}
+    base_rel = _normalize_scores(base_rel)
+
+    aspects = xquad_aspects or _default_aspects_from_query(query_text)
+    if store.bm25 is not None:
+        aspect_rel = {a: _normalize_scores(_bm25_scores_for_query(store, a, tokenizer_fn)) for a in aspects}
+    else:
+        aspect_rel = {a: {} for a in aspects}
+
+    selected: List[int] = []
+    selected_vids: List[int] = []
+    remaining = set(range(len(results)))
+
+    while len(selected) < min(top_k, len(results)):
+        coverage = {
+            a: 0.0 if not selected_vids else xquad_beta * max(aspect_rel.get(a, {}).get(vid, 0.0) for vid in selected_vids)
+            for a in aspects
+        }
+        best_idx, best_score = None, -1e9
+
+        for i in remaining:
+            vid = vector_ids[i]
+            # MMR term
+            mmr_rel = float(q2d[i])
+            mmr_red = 0.0 if not selected else float(np.max(d2d[i, selected]))
+            mmr_score = mmr_lambda * mmr_rel - (1.0 - mmr_lambda) * mmr_red
+            # xQuAD term
+            rel_q = base_rel.get(vid, 0.0)
+            div_bonus = sum((1.0 - coverage[a]) * aspect_rel.get(a, {}).get(vid, 0.0) for a in aspects)
+            xq_score = xquad_alpha * rel_q + (1.0 - xquad_alpha) * div_bonus
+            # Blend
+            blended = gamma * mmr_score + (1.0 - gamma) * xq_score
+            if blended > best_score:
+                best_score, best_idx = blended, i
+
+        selected.append(best_idx)
+        selected_vids.append(vector_ids[best_idx])
+        remaining.remove(best_idx)
+
+    out = []
+    for rank, idx in enumerate(selected):
+        item = dict(results[idx])
+        item["both_rank"] = rank + 1
+        item["both_mode"] = "blended"
+        item["both_gamma"] = gamma
+        out.append(item)
+    return out
+
+# ----------------------------
+# Dedup → (optional) diversify
+# ----------------------------
+
+def diversify_results(
+    store: Store,
+    query_text: str,
+    results: List[Dict[str, Any]],
+    method: Optional[str] = None,      # None | "mmr" | "xquad" | "both"
+    top_k: int = 10,
+    *,
+    mmr_lambda: float = 0.5,
+    xquad_alpha: float = 0.7,
+    xquad_beta: float = 0.3,
+    xquad_aspects: Optional[List[str]] = None,
+    tokenizer_fn = None,
+    content_key: str = "content",
+    # "both" options:
+    both_mode: str = "sequential",     # "sequential" | "blended"
+    both_order: str = "mmr->xquad",
+    both_gamma: float = 0.5
+) -> List[Dict[str, Any]]:
+    """Run deduplicate() first, then apply MMR/xQuAD/both if requested."""
+    if not results:
+        return results
+
+    results = deduplicate(results, score_key="score")
+
+    if not method:
+        return results[:top_k]
+
+    m = method.lower()
+    if m == "mmr":
+        return mmr_diversify(
+            store=store, query_text=query_text, results=results, top_k=top_k,
+            lambda_mmr=mmr_lambda, content_key=content_key
+        )
+    elif m == "xquad":
+        return xquad_diversify(
+            store=store, query_text=query_text, results=results, top_k=top_k,
+            aspects=xquad_aspects, alpha=xquad_alpha, beta=xquad_beta,
+            content_key=content_key, tokenizer_fn=tokenizer_fn
+        )
+    elif m == "both":
+        return diversify_mmr_xquad(
+            store=store, query_text=query_text, results=results, top_k=top_k,
+            mode=both_mode, order=both_order, mmr_lambda=mmr_lambda,
+            xquad_alpha=xquad_alpha, xquad_beta=xquad_beta,
+            xquad_aspects=xquad_aspects, tokenizer_fn=tokenizer_fn,
+            content_key=content_key, gamma=both_gamma
+        )
+    else:
+        return results[:top_k]
+
 
 def cross_encoder_rerank(
     cross_enc,
@@ -424,6 +765,90 @@ def query_once(store: Store, query: str, k: int = 10, nprobe: int = 16):
     return results
 
 
+# def hybrid_query(
+#     store: Store,
+#     query: str,
+#     k: int = 10,
+#     k_fa: int = 10,
+#     k_bm: int = 50,
+#     alpha: float = 0.5,
+#     nprobe: int = 16,
+#     tokenizer_fn = None
+# ):
+#     """
+#     Hybrid query using Store object.
+#
+#     Args:
+#         store: Store object containing index, BM25, and metadata
+#         query: Query string
+#         k: Number of final results to return
+#         k_fa: Number of FAISS results to retrieve
+#         k_bm: Number of BM25 results to retrieve
+#         alpha: Weight for FAISS vs BM25 (0.5 = equal weight)
+#         nprobe: Number of clusters to search for IVF indices
+#         tokenizer_fn: Tokenizer function (auto-detected from build args if None)
+#
+#     Returns:
+#         List of result dictionaries with hybrid scores
+#     """
+#     if tokenizer_fn is None:
+#         # Auto-detect tokenizer based on build args stored in store
+#         tokenizer_fn = get_appropriate_tokenizer(store)
+#
+#     if store.bm25 is None:
+#         raise ValueError("BM25 is not available in the store")
+#
+#     # FAISS retrieval
+#     store.index.nprobe = nprobe
+#     q_emb = embed_and_normalize([query], store.emb)
+#     D_fa, I_fa = store.index.search(q_emb, k_fa)
+#     faiss_scores = {int(vid): float(score) for vid, score in zip(I_fa[0], D_fa[0]) if vid != -1}
+#
+#     # BM25 retrieval using bm25.get_scores
+#     q_tokens = tokenizer_fn(query)
+#     bm25_scores_array = store.bm25.get_scores(q_tokens)       # scores per document index
+#     # pick top document indices from BM25
+#     top_bm25_idxs = np.argsort(bm25_scores_array)[::-1][:k_bm]
+#     bm25_scores = {}
+#
+#     # TODO optimize, create these once in load_store
+#     v2d_len = len(store.v2d)
+#     v2d_list = list(store.v2d.keys())
+#
+#     for doc_idx in top_bm25_idxs:
+#         # We need to map doc_idx to vector_id
+#         # Since BM25 was built with the same order as the index, we can use the v2d mapping
+#         # But we need to find the vector_id that corresponds to this doc_idx
+#         # This is a bit tricky - we need to find which vector_id maps to this document position
+#         # For now, let's assume the BM25 corpus order matches the vector order
+#         if doc_idx < v2d_len:
+#             # Get the vector_id at this position (assuming order is preserved)
+#             vector_id = v2d_list[doc_idx]
+#             bm25_scores[int(vector_id)] = float(bm25_scores_array[doc_idx])
+#
+#     # Normalize each score type to [0,1]
+#     max_fa = max(faiss_scores.values()) if faiss_scores else 1.0
+#     max_bm = max(bm25_scores.values()) if bm25_scores else 1.0
+#
+#     candidates = set(faiss_scores) | set(bm25_scores)
+#     results = []
+#     for vid in candidates:
+#         norm_fa = faiss_scores.get(vid, 0.0) / max_fa
+#         norm_bm = bm25_scores.get(vid, 0.0) / max_bm
+#         hybrid_score = alpha * norm_fa + (1 - alpha) * norm_bm
+#
+#         # Get data from vector_id using the extracted function
+#         data = get_data_from_vector_id(store, int(vid))
+#
+#         results.append({
+#             "score": hybrid_score,
+#             "faiss_score": faiss_scores.get(vid, 0.0),
+#             "bm25_score": bm25_scores.get(vid, 0.0),
+#             **data
+#         })
+#
+#     results.sort(key=lambda x: x["score"], reverse=True)
+#     return results[:k]
 def hybrid_query(
     store: Store,
     query: str,
@@ -432,26 +857,22 @@ def hybrid_query(
     k_bm: int = 50,
     alpha: float = 0.5,
     nprobe: int = 16,
-    tokenizer_fn = None
+    tokenizer_fn = None,
+    # NEW:
+    diversify: Optional[str] = None,     # None | "mmr" | "xquad" | "both"
+    diversify_k: Optional[int] = None,   # pool to diversify from (defaults to k)
+    mmr_lambda: float = 0.5,
+    xquad_alpha: float = 0.7,
+    xquad_beta: float = 0.3,
+    xquad_aspects: Optional[List[str]] = None,
+    both_mode: str = "sequential",       # for method="both"
+    both_order: str = "mmr->xquad",      # for method="both" & sequential
+    both_gamma: float = 0.5              # for method="both" & blended
 ):
     """
-    Hybrid query using Store object.
-    
-    Args:
-        store: Store object containing index, BM25, and metadata
-        query: Query string
-        k: Number of final results to return
-        k_fa: Number of FAISS results to retrieve
-        k_bm: Number of BM25 results to retrieve
-        alpha: Weight for FAISS vs BM25 (0.5 = equal weight)
-        nprobe: Number of clusters to search for IVF indices
-        tokenizer_fn: Tokenizer function (auto-detected from build args if None)
-        
-    Returns:
-        List of result dictionaries with hybrid scores
+    Hybrid query using Store object, with optional diversity-aware re-ranking.
     """
     if tokenizer_fn is None:
-        # Auto-detect tokenizer based on build args stored in store
         tokenizer_fn = get_appropriate_tokenizer(store)
 
     if store.bm25 is None:
@@ -463,49 +884,61 @@ def hybrid_query(
     D_fa, I_fa = store.index.search(q_emb, k_fa)
     faiss_scores = {int(vid): float(score) for vid, score in zip(I_fa[0], D_fa[0]) if vid != -1}
 
-    # BM25 retrieval using bm25.get_scores
+    # BM25 retrieval
     q_tokens = tokenizer_fn(query)
-    bm25_scores_array = store.bm25.get_scores(q_tokens)       # scores per document index
-    # pick top document indices from BM25
+    bm25_scores_array = store.bm25.get_scores(q_tokens)
     top_bm25_idxs = np.argsort(bm25_scores_array)[::-1][:k_bm]
+
+    v2d_list = _v2d_list(store)
     bm25_scores = {}
-    
-    # TODO optimize, create these once in load_store
-    v2d_len = len(store.v2d)
-    v2d_list = list(store.v2d.keys())
-    
     for doc_idx in top_bm25_idxs:
-        # We need to map doc_idx to vector_id
-        # Since BM25 was built with the same order as the index, we can use the v2d mapping
-        # But we need to find the vector_id that corresponds to this doc_idx
-        # This is a bit tricky - we need to find which vector_id maps to this document position
-        # For now, let's assume the BM25 corpus order matches the vector order
-        if doc_idx < v2d_len:
-            # Get the vector_id at this position (assuming order is preserved)
+        if doc_idx < len(v2d_list):
             vector_id = v2d_list[doc_idx]
             bm25_scores[int(vector_id)] = float(bm25_scores_array[doc_idx])
 
-    # Normalize each score type to [0,1]
-    max_fa = max(faiss_scores.values()) if faiss_scores else 1.0
-    max_bm = max(bm25_scores.values()) if bm25_scores else 1.0
+    # Normalize each score type robustly
+    norm_fa = _normalize_scores(faiss_scores)
+    norm_bm = _normalize_scores(bm25_scores)
 
+    # Merge candidates; compute hybrid score
     candidates = set(faiss_scores) | set(bm25_scores)
     results = []
     for vid in candidates:
-        norm_fa = faiss_scores.get(vid, 0.0) / max_fa
-        norm_bm = bm25_scores.get(vid, 0.0) / max_bm
-        hybrid_score = alpha * norm_fa + (1 - alpha) * norm_bm
-        
-        # Get data from vector_id using the extracted function
+        nf = norm_fa.get(vid, 0.0)
+        nb = norm_bm.get(vid, 0.0)
+        hybrid_score = alpha * nf + (1.0 - alpha) * nb
         data = get_data_from_vector_id(store, int(vid))
-        
         results.append({
             "score": hybrid_score,
             "faiss_score": faiss_scores.get(vid, 0.0),
             "bm25_score": bm25_scores.get(vid, 0.0),
-            **data
+            **(data or {"vector_id": int(vid), "db_id": None, "content": ""})
         })
 
     results.sort(key=lambda x: x["score"], reverse=True)
+
+    # Keep a larger pool before diversification (helps both MMR and xQuAD)
+    pool_size = max(k, diversify_k or k)
+    results = results[:pool_size]
+
+    # Dedup → (optional) diversity
+    results = diversify_results(
+        store=store,
+        query_text=query,
+        results=results,
+        method=diversify,           # None | "mmr" | "xquad" | "both"
+        top_k=k,
+        mmr_lambda=mmr_lambda,
+        xquad_alpha=xquad_alpha,
+        xquad_beta=xquad_beta,
+        xquad_aspects=xquad_aspects,
+        tokenizer_fn=tokenizer_fn,
+        content_key="content",
+        both_mode=both_mode,
+        both_order=both_order,
+        both_gamma=both_gamma
+    )
+
     return results[:k]
+
 

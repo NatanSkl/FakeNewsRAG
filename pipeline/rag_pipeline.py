@@ -37,10 +37,10 @@ def _get_timestamp() -> str:
 def classify_article_rag_dummy(
     article_title: str,
     article_content: str,
-    reranking_type: str = None,
+    store,
+    ce_model = None,
     diversify_type: str = None,
     *,
-    store_dir: str = "mini_index/store",
     llm: LocalLLM,
     retrieval_config: RetrievalConfig | None = None,
     verbose: bool = False
@@ -64,10 +64,10 @@ def classify_article_rag_dummy(
 def classify_article_rag(
     article_title: str,
     article_content: str,
+    store,
     *,
-    reranking_type: str = None,
+    ce_model = None,
     diversify_type: str = None,
-    store_dir: str = "mini_index/store",
     llm: LocalLLM,
     retrieval_config: RetrievalConfig | None = None,
     verbose: bool = False
@@ -78,7 +78,9 @@ def classify_article_rag(
     Args:
         article_title: Title of the article to classify
         article_content: Content of the article to classify
-        store_dir: Path to the index store
+        store: Pre-loaded store object containing index, model, and metadata
+        ce_model: Cross-encoder model for reranking (None to skip)
+        diversify_type: Diversity method ("mmr" or None to skip)
         llm: Language model for summarization and classification
         retrieval_config: Configuration for retrieval (uses defaults if None)
         verbose: Whether to print verbose output with timestamps
@@ -88,18 +90,16 @@ def classify_article_rag(
     """
     if verbose:
         print(f"[{_get_timestamp()}] [RAG Pipeline] Starting classification for: '{article_title[:50]}...'")
-        print(f"[{_get_timestamp()}] [RAG Pipeline] Store directory: {store_dir}")
-    
-    # Load the index store
-    if verbose:
-        print(f"[{_get_timestamp()}] [RAG Pipeline] Loading index store...")
-    store = load_store(store_dir, verbose=verbose)
-    if verbose:
-        print(f"[{_get_timestamp()}] [RAG Pipeline] Index store loaded successfully")
+        print(f"[{_get_timestamp()}] [RAG Pipeline] Using pre-loaded store")
     
     # Use default config if none provided
     if retrieval_config is None:
-        retrieval_config = RetrievalConfig(k=12, verbose=verbose)
+        retrieval_config = RetrievalConfig(
+            k=12, 
+            ce_model=ce_model,
+            diversity_type=diversify_type,
+            verbose=verbose
+        )
         if verbose:
             print(f"[{_get_timestamp()}] [RAG Pipeline] Using default retrieval config")
     
@@ -208,7 +208,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run full RAG pipeline on an article")
     parser.add_argument("--title", required=True, help="Article title")
     parser.add_argument("--content", required=True, help="Article content")
-    parser.add_argument("--store", default="mini_index/store", help="Path to index store")
+    parser.add_argument("--store", default="/StudentData/slice", help="Path to index store")
     parser.add_argument("--llm-type", choices=["llama", "mistral"], default="llama", help="LLM type")
     parser.add_argument("--llm-url", default="http://localhost:8000", help="LLM server URL")
     args = parser.parse_args()
@@ -219,11 +219,15 @@ def main():
     else:
         llm = Mistral(args.llm_url)
     
+    # Load store
+    print("Loading store...")
+    store = load_store(args.store, verbose=True)
+    
     # Run RAG pipeline
     result = classify_article_rag(
         article_title=args.title,
         article_content=args.content,
-        store_dir=args.store,
+        store=store,
         llm=llm
     )
     

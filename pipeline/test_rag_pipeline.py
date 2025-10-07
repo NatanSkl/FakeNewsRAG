@@ -19,7 +19,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipeline.rag_pipeline import classify_article_rag, RAGOutput
 from common.llm_client import Llama, Mistral, LocalLLM
-from retrieval import RetrievalConfig
+from retrieval import RetrievalConfig, load_store
 
 
 def test_rag_pipeline(
@@ -68,14 +68,21 @@ def test_rag_pipeline(
         print(f"[{datetime.now().strftime('%H:%M')}] Error initializing LLM: {e}")
         return None
     
+    # Load store
+    print(f"[{datetime.now().strftime('%H:%M')}] Loading store...")
+    try:
+        store = load_store(store_path, verbose=verbose)
+        print(f"[{datetime.now().strftime('%H:%M')}] Store loaded successfully")
+    except Exception as e:
+        print(f"[{datetime.now().strftime('%H:%M')}] Error loading store: {e}")
+        return None
+    
     # Configure retrieval
     retrieval_config = RetrievalConfig(
-        k_dense=100,  # Smaller for faster testing
-        k_bm25=100,
-        topn=10,
-        domain_cap=3,
-        use_xquad=True,
-        use_cross_encoder=True
+        k=10,  # Number of results to return
+        ce_model=None,  # No cross-encoder for testing
+        diversity_type=None,  # No diversity for testing
+        verbose=verbose
     )
     
     if verbose:
@@ -89,7 +96,7 @@ def test_rag_pipeline(
         result = classify_article_rag(
             article_title=article_title,
             article_content=article_content,
-            store_dir=store_path,
+            store=store,
             llm=llm,
             retrieval_config=retrieval_config,
             verbose=verbose

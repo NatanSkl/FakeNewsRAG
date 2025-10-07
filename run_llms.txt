@@ -9,3 +9,18 @@ python -m llama_cpp.server \
   --model ./models/mistral-7b-instruct/mistral-7b-instruct-v0.2.Q4_K_M.gguf \
   --n_gpu_layers -1 --n_ctx 2048 --n_batch 256 --offload_kqv true \
   --host 127.0.0.1 --port 8011
+
+
+
+
+curl http://127.0.0.1:8010/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+        "model": "local",
+        "messages": [
+          {"role":"system","content":"You are helpful."},
+          {"role":"user","content":"Say bananas! in one short sentence."}
+        ],
+        "max_tokens": 64,
+        "temperature": 0.2
+      }'

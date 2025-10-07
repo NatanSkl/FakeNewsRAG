@@ -1,8 +1,0 @@
-{
-  "embedding_model": "BAAI/bge-small-en-v1.5",
-  "dim": 384,
-  "num_chunks": 482,
-  "bm25_docs": 482,
-  "chunk_tokens": 700,
-  "overlap_tokens": 120
-}

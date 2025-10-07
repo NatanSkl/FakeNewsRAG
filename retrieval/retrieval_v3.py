@@ -249,9 +249,8 @@ def embed_and_normalize(texts, model):
     return X.astype(np.float32)
 
 
-# TODO copy with adjustments cross_encoder_rerank from for cross-encoder/ms-marco-MiniLM-L-6-v2, castorini/monot5-base-msmarco
-# TODO copy diversify with mmr, xquad
 # TODO create retrieve_evidence
+# TODO create filter function
 
 
 def deduplicate(results: List[Dict[str, Any]], score_key: str = "score") -> List[Dict[str, Any]]:
@@ -392,9 +391,7 @@ def mmr_diversify(
         item["mmr_rank"] = rank + 1
         out.append(item)
     return out
-# ----------------------------
-# xQuAD diversity re-ranking
-# ----------------------------
+
 
 def xquad_diversify(
     store: Store,
@@ -469,170 +466,6 @@ def xquad_diversify(
         item["xquad_aspects"] = aspects
         out.append(item)
     return out
-# ----------------------------
-# Combine MMR and xQuAD
-# ----------------------------
-
-def diversify_mmr_xquad(
-    store: Store,
-    query_text: str,
-    results: List[Dict[str, Any]],
-    top_k: int,
-    *,
-    mode: str = "sequential",       # "sequential" | "blended"
-    order: str = "mmr->xquad",      # used when mode == "sequential"
-    mmr_lambda: float = 0.5,
-    xquad_alpha: float = 0.7,
-    xquad_beta: float = 0.3,
-    xquad_aspects: Optional[List[str]] = None,
-    tokenizer_fn = None,
-    content_key: str = "content",
-    gamma: float = 0.5              # used when mode == "blended"
-) -> List[Dict[str, Any]]:
-    """Apply both MMR and xQuAD on deduped results."""
-    if not results:
-        return results
-
-    # Dedup first to enforce diversity across articles
-    results = deduplicate(results, score_key="score")
-
-    if mode == "sequential":
-        pool = min(len(results), max(top_k * 3, 30))
-        if order.lower() == "mmr->xquad":
-            stage1 = mmr_diversify(
-                store, query_text, results[:pool], top_k=pool,
-                lambda_mmr=mmr_lambda, content_key=content_key
-            )
-            return xquad_diversify(
-                store, query_text, stage1, top_k=top_k,
-                aspects=xquad_aspects, alpha=xquad_alpha, beta=xquad_beta,
-                content_key=content_key, tokenizer_fn=tokenizer_fn
-            )
-        else:  # xquad->mmr
-            stage1 = xquad_diversify(
-                store, query_text, results[:pool], top_k=pool,
-                aspects=xquad_aspects, alpha=xquad_alpha, beta=xquad_beta,
-                content_key=content_key, tokenizer_fn=tokenizer_fn
-            )
-            return mmr_diversify(
-                store, query_text, stage1, top_k=top_k,
-                lambda_mmr=mmr_lambda, content_key=content_key
-            )
-
-    # ---------- blended ----------
-    if tokenizer_fn is None:
-        tokenizer_fn = get_appropriate_tokenizer(store)
-
-    # Precompute for MMR
-    cand_texts = [r.get(content_key, "") or "" for r in results]
-    doc_embs = _embed_texts_norm(store.emb, cand_texts)
-    q_emb = _embed_texts_norm(store.emb, [query_text])[0:1]
-    q2d = (q_emb @ doc_embs.T)[0]
-    d2d = doc_embs @ doc_embs.T
-
-    # Base relevance for xQuAD
-    vector_ids = [int(r.get("vector_id") or -1) for r in results]
-    base_rel = {int(r["vector_id"]): float(r.get("score", 0.0)) for r in results if r.get("vector_id") is not None}
-    base_rel = _normalize_scores(base_rel)
-
-    aspects = xquad_aspects or _default_aspects_from_query(query_text)
-    if store.bm25 is not None:
-        aspect_rel = {a: _normalize_scores(_bm25_scores_for_query(store, a, tokenizer_fn)) for a in aspects}
-    else:
-        aspect_rel = {a: {} for a in aspects}
-
-    selected: List[int] = []
-    selected_vids: List[int] = []
-    remaining = set(range(len(results)))
-
-    while len(selected) < min(top_k, len(results)):
-        coverage = {
-            a: 0.0 if not selected_vids else xquad_beta * max(aspect_rel.get(a, {}).get(vid, 0.0) for vid in selected_vids)
-            for a in aspects
-        }
-        best_idx, best_score = None, -1e9
-
-        for i in remaining:
-            vid = vector_ids[i]
-            # MMR term
-            mmr_rel = float(q2d[i])
-            mmr_red = 0.0 if not selected else float(np.max(d2d[i, selected]))
-            mmr_score = mmr_lambda * mmr_rel - (1.0 - mmr_lambda) * mmr_red
-            # xQuAD term
-            rel_q = base_rel.get(vid, 0.0)
-            div_bonus = sum((1.0 - coverage[a]) * aspect_rel.get(a, {}).get(vid, 0.0) for a in aspects)
-            xq_score = xquad_alpha * rel_q + (1.0 - xquad_alpha) * div_bonus
-            # Blend
-            blended = gamma * mmr_score + (1.0 - gamma) * xq_score
-            if blended > best_score:
-                best_score, best_idx = blended, i
-
-        selected.append(best_idx)
-        selected_vids.append(vector_ids[best_idx])
-        remaining.remove(best_idx)
-
-    out = []
-    for rank, idx in enumerate(selected):
-        item = dict(results[idx])
-        item["both_rank"] = rank + 1
-        item["both_mode"] = "blended"
-        item["both_gamma"] = gamma
-        out.append(item)
-    return out
-
-# ----------------------------
-# Dedup → (optional) diversify
-# ----------------------------
-
-def diversify_results(
-    store: Store,
-    query_text: str,
-    results: List[Dict[str, Any]],
-    method: Optional[str] = None,      # None | "mmr" | "xquad" | "both"
-    top_k: int = 10,
-    *,
-    mmr_lambda: float = 0.5,
-    xquad_alpha: float = 0.7,
-    xquad_beta: float = 0.3,
-    xquad_aspects: Optional[List[str]] = None,
-    tokenizer_fn = None,
-    content_key: str = "content",
-    # "both" options:
-    both_mode: str = "sequential",     # "sequential" | "blended"
-    both_order: str = "mmr->xquad",
-    both_gamma: float = 0.5
-) -> List[Dict[str, Any]]:
-    """Run deduplicate() first, then apply MMR/xQuAD/both if requested."""
-    if not results:
-        return results
-
-    results = deduplicate(results, score_key="score")
-
-    if not method:
-        return results[:top_k]
-
-    m = method.lower()
-    if m == "mmr":
-        return mmr_diversify(
-            store=store, query_text=query_text, results=results, top_k=top_k,
-            lambda_mmr=mmr_lambda, content_key=content_key
-        )
-    elif m == "xquad":
-        return xquad_diversify(
-            store=store, query_text=query_text, results=results, top_k=top_k,
-            aspects=xquad_aspects, alpha=xquad_alpha, beta=xquad_beta,
-            content_key=content_key, tokenizer_fn=tokenizer_fn
-        )
-    elif m == "both":
-        return diversify_mmr_xquad(
-            store=store, query_text=query_text, results=results, top_k=top_k,
-            mode=both_mode, order=both_order, mmr_lambda=mmr_lambda,
-            xquad_alpha=xquad_alpha, xquad_beta=xquad_beta,
-            xquad_aspects=xquad_aspects, tokenizer_fn=tokenizer_fn,
-            content_key=content_key, gamma=both_gamma
-        )
-    else:
-        return results[:top_k]
 
 
 def cross_encoder_rerank(

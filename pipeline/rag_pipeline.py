@@ -93,13 +93,13 @@ def classify_article_rag(
     # Load the index store
     if verbose:
         print(f"[{_get_timestamp()}] [RAG Pipeline] Loading index store...")
-    store = load_store(store_dir)
+    store = load_store(store_dir, verbose=verbose)
     if verbose:
         print(f"[{_get_timestamp()}] [RAG Pipeline] Index store loaded successfully")
     
     # Use default config if none provided
     if retrieval_config is None:
-        retrieval_config = RetrievalConfig()
+        retrieval_config = RetrievalConfig(k=12, verbose=verbose)
         if verbose:
             print(f"[{_get_timestamp()}] [RAG Pipeline] Using default retrieval config")
     
@@ -109,10 +109,11 @@ def classify_article_rag(
     fake_hits = retrieve_evidence(
         store, 
         article_content, 
-        title_hint=article_title, 
-        label_name="fake", 
-        cfg=retrieval_config,
-        verbose=verbose
+        "fake", 
+        retrieval_config.ce_model,
+        retrieval_config.diversity_type,
+        retrieval_config.k,
+        verbose
     )
     if verbose:
         print(f"[{_get_timestamp()}] [RAG Pipeline] Retrieved {len(fake_hits)} fake evidence chunks")
@@ -122,10 +123,11 @@ def classify_article_rag(
     credible_hits = retrieve_evidence(
         store, 
         article_content, 
-        title_hint=article_title, 
-        label_name="credible", 
-        cfg=retrieval_config,
-        verbose=verbose
+        "credible", 
+        retrieval_config.ce_model,
+        retrieval_config.diversity_type,
+        retrieval_config.k,
+        verbose
     )
     if verbose:
         print(f"[{_get_timestamp()}] [RAG Pipeline] Retrieved {len(credible_hits)} credible evidence chunks")
@@ -135,9 +137,9 @@ def classify_article_rag(
         print(f"[{_get_timestamp()}] [RAG Pipeline] Converting evidence to chunks...")
     fake_evidence = [
         EvidenceChunk(
-            id=h.get("id", "unknown"),
+            id=h.get("db_id", "unknown"),
             title=h.get("title", ""),
-            text=h["chunk_text"],
+            text=h["content"],
             label="fake"
         )
         for h in fake_hits
@@ -145,9 +147,9 @@ def classify_article_rag(
     
     credible_evidence = [
         EvidenceChunk(
-            id=h.get("id", "unknown"),
+            id=h.get("db_id", "unknown"),
             title=h.get("title", ""),
-            text=h["chunk_text"],
+            text=h["content"],
             label="reliable"
         )
         for h in credible_hits

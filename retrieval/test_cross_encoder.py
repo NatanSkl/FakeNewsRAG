@@ -9,7 +9,7 @@ different cross-encoder models.
 import argparse
 from typing import List, Dict, Any
 
-from retrieval_v3 import cross_encoder_rerank, base_score
+from retrieval_v3 import cross_encoder_rerank
 
 
 def create_test_results() -> List[Dict[str, Any]]:
@@ -61,7 +61,7 @@ def test_cross_encoder_rerank_basic(model_name: str):
     print("="*60)
     
     try:
-        from sentence_transformers import CrossEncoder
+        from sentence_transformers.cross_encoder import CrossEncoder
         cross_enc = CrossEncoder(model_name)
         print(f"Successfully loaded model: {model_name}")
     except Exception as e:
@@ -96,17 +96,17 @@ def test_cross_encoder_rerank_basic(model_name: str):
         print("Reranked results:")
         for i, result in enumerate(reranked, 1):
             print(f"  [{i}] db_id: {result['db_id']}, score: {result['score']:.4f}")
-            print(f"      base_score: {result.get('base_score', 'N/A')}")
+            print(f"      score: {result.get('score', 'N/A')}")
             print(f"      ce_score: {result.get('ce_score', 'N/A')}")
             print(f"      content: {result['content'][:60]}...")
         
         # Verify that scores have been updated
         has_ce_scores = all('ce_score' in r for r in reranked[:4])  # Top 4 should have CE scores
-        has_base_scores = all('base_score' in r for r in reranked[:4])
+        has_base_scores = all('score' in r for r in reranked[:4])
         
         print(f"\nVerification:")
         print(f"  Results have CE scores: {has_ce_scores}")
-        print(f"  Results have base scores: {has_base_scores}")
+        print(f"  Results have scores: {has_base_scores}")
         print(f"  Results are sorted by score: {all(reranked[i]['score'] >= reranked[i+1]['score'] for i in range(len(reranked)-1))}")
         
         return True
@@ -141,11 +141,6 @@ def test_cross_encoder_rerank_edge_cases():
     single_reranked = cross_encoder_rerank(None, "test query", single_result, ce_topk=1)
     print(f"Single result test passed: {len(single_reranked) == 1}")
     
-    # Test base_score function
-    print("\nTesting base_score function...")
-    test_result = {"score": 0.8, "hybrid_score": 0.6, "_score": 0.4}
-    score = base_score(test_result)
-    print(f"base_score test passed: {score == 0.8}")
     
     return True
 
@@ -154,7 +149,7 @@ def test_both_models():
     """Test both cross-encoder models."""
     models = [
         "cross-encoder/ms-marco-MiniLM-L-6-v2",
-        "castorini/monot5-base-msmarco"
+        "cross-encoder/ms-marco-electra-base"
     ]
     
     results = {}
@@ -230,3 +225,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

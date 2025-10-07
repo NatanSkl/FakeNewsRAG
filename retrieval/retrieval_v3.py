@@ -36,6 +36,15 @@ class Store:
     ce_model: Optional[CrossEncoder] = None  # Optional cross-encoder model
 
 
+@dataclass
+class RetrievalConfig:
+    """Configuration for retrieval operations - compatibility class for v3 interface."""
+    k: int = 10  # Number of results to return
+    ce_model: Optional[CrossEncoder] = None  # Cross-encoder model for reranking
+    diversity_type: Optional[str] = None  # Diversity method ("mmr" or None)
+    verbose: bool = False  # Verbose output
+
+
 def simple_tokenizer(text: str) -> List[str]:
     """Simple tokenizer that matches the BM25 corpus building process.
     
@@ -176,7 +185,7 @@ def load_store(store_dir: str, verbose: bool = False, ce_model_name: Optional[st
     if not metadata_path.exists():
         raise FileNotFoundError(f"metadata.csv not found in {store_dir}")
     
-    df_meta = pd.read_csv(metadata_path)
+    df_meta = pd.read_csv(metadata_path)  # TODO replace v2d with search function
     v2d = {int(row["vector_id"]): int(row["db_id"]) for _, row in df_meta.iterrows()}
     
     if verbose:
@@ -249,9 +258,8 @@ def embed_and_normalize(texts, model):
     return X.astype(np.float32)
 
 
-# TODO copy with adjustments cross_encoder_rerank from for cross-encoder/ms-marco-MiniLM-L-6-v2, castorini/monot5-base-msmarco
-# TODO copy diversify with mmr, xquad
 # TODO create retrieve_evidence
+# TODO create filter function
 
 
 def deduplicate(results: List[Dict[str, Any]], score_key: str = "score") -> List[Dict[str, Any]]:
@@ -292,6 +300,144 @@ def deduplicate(results: List[Dict[str, Any]], score_key: str = "score") -> List
     deduplicated.sort(key=lambda x: x.get(score_key, float('-inf')), reverse=True)
     
     return deduplicated
+
+
+def filter_label(results: List[Dict[str, Any]], label: str) -> List[Dict[str, Any]]:
+    """
+    Filter results to keep only those with the specified label.
+    
+    Args:
+        results: List of result dictionaries from query_once or other retrieval functions
+        label: Label to filter by (e.g., "real", "fake")
+        
+    Returns:
+        List of results that have the specified label
+    """
+    if not results:
+        return results
+    
+    filtered = []
+    for result in results:
+        if result.get("label") == label:
+            filtered.append(result)
+    
+    return filtered
+
+
+def retrieve_evidence(store: Store,
+                      article_text: str,
+                      label_name: str,
+                      ce_model,
+                      diversity_type,
+                      k: int,
+                      verbose: bool = False) -> List[Dict[str, Any]]:
+    """
+    Retrieve evidence for an article with optional cross-encoder reranking and diversity.
+    
+    Args:
+        store: Store object containing index, model, and metadata
+        article_text: Article text to find evidence for
+        label_name: Label to filter by (e.g., "real", "fake")
+        ce_model: Cross-encoder model for reranking (None to skip)
+        diversity_type: Diversity method ("mmr" or None to skip)
+        k: Number of final results to return
+        verbose: If True, print progress information
+        
+    Returns:
+        List of evidence results with optional reranking and diversification
+    """
+    if verbose:
+        print(f"Starting evidence retrieval for label: {label_name}")
+        print(f"Article text: {article_text[:100]}...")
+    
+    # Step 1: Perform initial query
+    if verbose:
+        print("Step 1: Performing initial query...")
+    
+    # Use a larger k for initial retrieval to account for filtering and diversification
+    initial_k = max(k * 3, 50)  # Retrieve 3x more than needed, minimum 50
+    results = query_once(store, article_text, k=initial_k)
+    
+    if verbose:
+        print(f"Retrieved {len(results)} initial results")
+    
+    # Step 2: Deduplicate results
+    if verbose:
+        print("Step 2: Deduplicating results...")
+    
+    results = deduplicate(results)
+    
+    if verbose:
+        print(f"After deduplication: {len(results)} results")
+    
+    # Step 3: Filter by label
+    if verbose:
+        print(f"Step 3: Filtering by label '{label_name}'...")
+    
+    results = filter_label(results, label_name)
+    
+    if verbose:
+        print(f"After label filtering: {len(results)} results")
+    
+    if not results:
+        if verbose:
+            print("No results found after filtering, returning empty list")
+        return []
+    
+    # Step 4: Cross-encoder reranking (if model provided)
+    if ce_model is not None:
+        if verbose:
+            print("Step 4: Applying cross-encoder reranking...")
+        
+        try:
+            results = cross_encoder_rerank(
+                cross_enc=ce_model,
+                query_text=article_text,
+                results=results,
+                ce_topk=min(len(results), k * 2),  # Rerank up to 2x final k
+                ce_weight=1.0,
+                batch_size=8
+            )
+            
+            if verbose:
+                print(f"After cross-encoder reranking: {len(results)} results")
+                
+        except Exception as e:
+            if verbose:
+                print(f"Cross-encoder reranking failed: {e}")
+            # Continue without reranking if it fails
+    
+    # Step 5: Diversity (if requested)
+    if diversity_type is not None and diversity_type.lower() == "mmr":
+        if verbose:
+            print("Step 5: Applying MMR diversification...")
+        
+        try:
+            results = mmr_diversify(
+                store=store,
+                query_text=article_text,
+                results=results,
+                top_k=k,
+                lambda_mmr=0.5,
+                content_key="content"
+            )
+            
+            if verbose:
+                print(f"After MMR diversification: {len(results)} results")
+                
+        except Exception as e:
+            if verbose:
+                print(f"MMR diversification failed: {e}")
+            # Continue without diversification if it fails
+    
+    # Step 6: Return top k results
+    final_results = results[:k]
+    
+    if verbose:
+        print(f"Final results: {len(final_results)} evidence items")
+        print("Evidence retrieval completed successfully!")
+    
+    return final_results
 
 # ----------------------------
 # Utility helpers
@@ -392,9 +538,7 @@ def mmr_diversify(
         item["mmr_rank"] = rank + 1
         out.append(item)
     return out
-# ----------------------------
-# xQuAD diversity re-ranking
-# ----------------------------
+
 
 def xquad_diversify(
     store: Store,
@@ -469,232 +613,65 @@ def xquad_diversify(
         item["xquad_aspects"] = aspects
         out.append(item)
     return out
-# ----------------------------
-# Combine MMR and xQuAD
-# ----------------------------
-
-def diversify_mmr_xquad(
-    store: Store,
-    query_text: str,
-    results: List[Dict[str, Any]],
-    top_k: int,
-    *,
-    mode: str = "sequential",       # "sequential" | "blended"
-    order: str = "mmr->xquad",      # used when mode == "sequential"
-    mmr_lambda: float = 0.5,
-    xquad_alpha: float = 0.7,
-    xquad_beta: float = 0.3,
-    xquad_aspects: Optional[List[str]] = None,
-    tokenizer_fn = None,
-    content_key: str = "content",
-    gamma: float = 0.5              # used when mode == "blended"
-) -> List[Dict[str, Any]]:
-    """Apply both MMR and xQuAD on deduped results."""
-    if not results:
-        return results
-
-    # Dedup first to enforce diversity across articles
-    results = deduplicate(results, score_key="score")
-
-    if mode == "sequential":
-        pool = min(len(results), max(top_k * 3, 30))
-        if order.lower() == "mmr->xquad":
-            stage1 = mmr_diversify(
-                store, query_text, results[:pool], top_k=pool,
-                lambda_mmr=mmr_lambda, content_key=content_key
-            )
-            return xquad_diversify(
-                store, query_text, stage1, top_k=top_k,
-                aspects=xquad_aspects, alpha=xquad_alpha, beta=xquad_beta,
-                content_key=content_key, tokenizer_fn=tokenizer_fn
-            )
-        else:  # xquad->mmr
-            stage1 = xquad_diversify(
-                store, query_text, results[:pool], top_k=pool,
-                aspects=xquad_aspects, alpha=xquad_alpha, beta=xquad_beta,
-                content_key=content_key, tokenizer_fn=tokenizer_fn
-            )
-            return mmr_diversify(
-                store, query_text, stage1, top_k=top_k,
-                lambda_mmr=mmr_lambda, content_key=content_key
-            )
-
-    # ---------- blended ----------
-    if tokenizer_fn is None:
-        tokenizer_fn = get_appropriate_tokenizer(store)
-
-    # Precompute for MMR
-    cand_texts = [r.get(content_key, "") or "" for r in results]
-    doc_embs = _embed_texts_norm(store.emb, cand_texts)
-    q_emb = _embed_texts_norm(store.emb, [query_text])[0:1]
-    q2d = (q_emb @ doc_embs.T)[0]
-    d2d = doc_embs @ doc_embs.T
-
-    # Base relevance for xQuAD
-    vector_ids = [int(r.get("vector_id") or -1) for r in results]
-    base_rel = {int(r["vector_id"]): float(r.get("score", 0.0)) for r in results if r.get("vector_id") is not None}
-    base_rel = _normalize_scores(base_rel)
-
-    aspects = xquad_aspects or _default_aspects_from_query(query_text)
-    if store.bm25 is not None:
-        aspect_rel = {a: _normalize_scores(_bm25_scores_for_query(store, a, tokenizer_fn)) for a in aspects}
-    else:
-        aspect_rel = {a: {} for a in aspects}
-
-    selected: List[int] = []
-    selected_vids: List[int] = []
-    remaining = set(range(len(results)))
-
-    while len(selected) < min(top_k, len(results)):
-        coverage = {
-            a: 0.0 if not selected_vids else xquad_beta * max(aspect_rel.get(a, {}).get(vid, 0.0) for vid in selected_vids)
-            for a in aspects
-        }
-        best_idx, best_score = None, -1e9
-
-        for i in remaining:
-            vid = vector_ids[i]
-            # MMR term
-            mmr_rel = float(q2d[i])
-            mmr_red = 0.0 if not selected else float(np.max(d2d[i, selected]))
-            mmr_score = mmr_lambda * mmr_rel - (1.0 - mmr_lambda) * mmr_red
-            # xQuAD term
-            rel_q = base_rel.get(vid, 0.0)
-            div_bonus = sum((1.0 - coverage[a]) * aspect_rel.get(a, {}).get(vid, 0.0) for a in aspects)
-            xq_score = xquad_alpha * rel_q + (1.0 - xquad_alpha) * div_bonus
-            # Blend
-            blended = gamma * mmr_score + (1.0 - gamma) * xq_score
-            if blended > best_score:
-                best_score, best_idx = blended, i
-
-        selected.append(best_idx)
-        selected_vids.append(vector_ids[best_idx])
-        remaining.remove(best_idx)
-
-    out = []
-    for rank, idx in enumerate(selected):
-        item = dict(results[idx])
-        item["both_rank"] = rank + 1
-        item["both_mode"] = "blended"
-        item["both_gamma"] = gamma
-        out.append(item)
-    return out
-
-# ----------------------------
-# Dedup → (optional) diversify
-# ----------------------------
-
-def diversify_results(
-    store: Store,
-    query_text: str,
-    results: List[Dict[str, Any]],
-    method: Optional[str] = None,      # None | "mmr" | "xquad" | "both"
-    top_k: int = 10,
-    *,
-    mmr_lambda: float = 0.5,
-    xquad_alpha: float = 0.7,
-    xquad_beta: float = 0.3,
-    xquad_aspects: Optional[List[str]] = None,
-    tokenizer_fn = None,
-    content_key: str = "content",
-    # "both" options:
-    both_mode: str = "sequential",     # "sequential" | "blended"
-    both_order: str = "mmr->xquad",
-    both_gamma: float = 0.5
-) -> List[Dict[str, Any]]:
-    """Run deduplicate() first, then apply MMR/xQuAD/both if requested."""
-    if not results:
-        return results
-
-    results = deduplicate(results, score_key="score")
-
-    if not method:
-        return results[:top_k]
-
-    m = method.lower()
-    if m == "mmr":
-        return mmr_diversify(
-            store=store, query_text=query_text, results=results, top_k=top_k,
-            lambda_mmr=mmr_lambda, content_key=content_key
-        )
-    elif m == "xquad":
-        return xquad_diversify(
-            store=store, query_text=query_text, results=results, top_k=top_k,
-            aspects=xquad_aspects, alpha=xquad_alpha, beta=xquad_beta,
-            content_key=content_key, tokenizer_fn=tokenizer_fn
-        )
-    elif m == "both":
-        return diversify_mmr_xquad(
-            store=store, query_text=query_text, results=results, top_k=top_k,
-            mode=both_mode, order=both_order, mmr_lambda=mmr_lambda,
-            xquad_alpha=xquad_alpha, xquad_beta=xquad_beta,
-            xquad_aspects=xquad_aspects, tokenizer_fn=tokenizer_fn,
-            content_key=content_key, gamma=both_gamma
-        )
-    else:
-        return results[:top_k]
-
-
-def base_score(result: dict) -> float:
-    """Extract base score from result dictionary."""
-    return result.get("score", result.get("hybrid_score", result.get("_score", 0.0)))
 
 
 def cross_encoder_rerank(
     cross_enc,
     query_text: str,
-    results: list[dict],
+    results: List[Dict[str, Any]],
     ce_topk: int = 200,
     ce_weight: float = 1.0,
     batch_size: int = 32,
-    norm: str = "minmax",        # or "zscore" / "logistic"
-    content_key: str = "content" # where the passage text lives
-) -> list[dict]:
+    content_key: str = "content"
+) -> List[Dict[str, Any]]:
+    # TODO add gpu support
     """
-    Rerank results with a cross-encoder, blending CE into a unified _score,
-    and globally resorting the whole list.
+    Rerank with a cross-encoder over the top-K by base_score.
+    Blends z-scored CE into 'score' and returns the re-sorted head only.
     """
-    if not results or cross_enc is None:
+    if not results or cross_enc is None or ce_topk <= 0:
         return results
 
-    # Keep stable order for ties
-    ordered = sorted(results, key=base_score, reverse=True)
-    head = ordered[:min(ce_topk, len(ordered))]
-    tail = ordered[len(head):]
+    # 1) Order by your base scorer (stable sort → stable ties)
+    ordered = sorted(results, key=lambda x: x.get("score", 0.0), reverse=True)
 
-    # 2) Build query-passage pairs
-    pairs = [(query_text, h.get(content_key, "")) for h in head]
+    k = min(ce_topk, len(ordered))
+    head = ordered[:k]
+
+    # 2) Build query-passage pairs (tolerate missing/None content)
+    pairs = [(query_text, (h.get(content_key) or "")) for h in head]
 
     try:
-        # TODO utilize gpu?
-        ce_scores = cross_enc.predict(
+        ce_raw = cross_enc.predict(
             pairs,
             batch_size=batch_size,
             show_progress_bar=False,
             convert_to_numpy=True
-        ).tolist()
+        )
+        ce_raw = np.asarray(ce_raw, dtype=float).reshape(-1)
     except Exception:
-        # If CE fails, just return the original ordering
-        return ordered
+        # On CE failure, return original top-k by base_score
+        return head
 
-    # 3) Normalize CE scores
-    arr = np.array(ce_scores, dtype=float)
-    mu, sd = float(arr.mean()), float(arr.std() or 1e-6)
-    zscores = [(s - mu) / sd for s in arr]
-    norm_scores = zscores
+    # 3) Z-score normalize within the head
+    mu = float(ce_raw.mean())
+    sd = float(ce_raw.std())
+    if sd == 0.0:
+        ce_norm = np.zeros_like(ce_raw)
+    else:
+        ce_norm = (ce_raw - mu) / sd
 
-    # 4) Blend and write unified scores
-    for res, ns, raw in zip(head, norm_scores, ce_scores):
+    # 4) Blend into 'score' and record debug fields
+    for res, raw, ns in zip(head, ce_raw.tolist(), ce_norm.tolist()):
+        b = float(res.get("score", 0.0))
+        res["base_score"] = b
         res["ce_score"] = float(raw)
-        res["base_score"] = res.get("score", 0.0)  # optional for debugging
-        res["score"] = res["base_score"] + ce_weight * float(ns)
+        res["score"] = b + ce_weight * ns
 
-    # 5) Global sort (head + tail) by unified _score
-    # Tail items keep their original _score/base_score
-    #combined = head + tail
-    combined = head
-    combined.sort(key=lambda r: r.get("_score", base_score(r)), reverse=True)
-    return combined
+    # 5) Return the top-k head re-sorted by blended score
+    head.sort(key=lambda r: r.get("score", 0.0), reverse=True)
+    return head
+
 
 
 def get_data_from_vector_id(store: Store, vector_id: int) -> Optional[Dict[str, Any]]:

@@ -176,7 +176,7 @@ def load_store(store_dir: str, verbose: bool = False, ce_model_name: Optional[st
     if not metadata_path.exists():
         raise FileNotFoundError(f"metadata.csv not found in {store_dir}")
     
-    df_meta = pd.read_csv(metadata_path)
+    df_meta = pd.read_csv(metadata_path)  # TODO replace v2d with search function
     v2d = {int(row["vector_id"]): int(row["db_id"]) for _, row in df_meta.iterrows()}
     
     if verbose:
@@ -294,66 +294,63 @@ def deduplicate(results: List[Dict[str, Any]], score_key: str = "score") -> List
     return deduplicated
 
 
-def base_score(result: dict) -> float:
-    """Extract base score from result dictionary."""
-    return result.get("score", result.get("hybrid_score", result.get("_score", 0.0)))
-
-
 def cross_encoder_rerank(
     cross_enc,
     query_text: str,
-    results: list[dict],
+    results: List[Dict[str, Any]],
     ce_topk: int = 200,
     ce_weight: float = 1.0,
     batch_size: int = 32,
-    norm: str = "minmax",        # or "zscore" / "logistic"
-    content_key: str = "content" # where the passage text lives
-) -> list[dict]:
+    content_key: str = "content"
+) -> List[Dict[str, Any]]:
+    # TODO add gpu support
     """
-    Rerank results with a cross-encoder, blending CE into a unified _score,
-    and globally resorting the whole list.
+    Rerank with a cross-encoder over the top-K by base_score.
+    Blends z-scored CE into 'score' and returns the re-sorted head only.
     """
-    if not results or cross_enc is None:
+    if not results or cross_enc is None or ce_topk <= 0:
         return results
 
-    # Keep stable order for ties
-    ordered = sorted(results, key=base_score, reverse=True)
-    head = ordered[:min(ce_topk, len(ordered))]
-    tail = ordered[len(head):]
+    # 1) Order by your base scorer (stable sort → stable ties)
+    ordered = sorted(results, key=lambda x: x.get("score", 0.0), reverse=True)
 
-    # 2) Build query-passage pairs
-    pairs = [(query_text, h.get(content_key, "")) for h in head]
+    k = min(ce_topk, len(ordered))
+    head = ordered[:k]
+
+    # 2) Build query-passage pairs (tolerate missing/None content)
+    pairs = [(query_text, (h.get(content_key) or "")) for h in head]
 
     try:
-        # TODO utilize gpu?
-        ce_scores = cross_enc.predict(
+        ce_raw = cross_enc.predict(
             pairs,
             batch_size=batch_size,
             show_progress_bar=False,
             convert_to_numpy=True
-        ).tolist()
+        )
+        ce_raw = np.asarray(ce_raw, dtype=float).reshape(-1)
     except Exception:
-        # If CE fails, just return the original ordering
-        return ordered
+        # On CE failure, return original top-k by base_score
+        return head
 
-    # 3) Normalize CE scores
-    arr = np.array(ce_scores, dtype=float)
-    mu, sd = float(arr.mean()), float(arr.std() or 1e-6)
-    zscores = [(s - mu) / sd for s in arr]
-    norm_scores = zscores
+    # 3) Z-score normalize within the head
+    mu = float(ce_raw.mean())
+    sd = float(ce_raw.std())
+    if sd == 0.0:
+        ce_norm = np.zeros_like(ce_raw)
+    else:
+        ce_norm = (ce_raw - mu) / sd
 
-    # 4) Blend and write unified scores
-    for res, ns, raw in zip(head, norm_scores, ce_scores):
+    # 4) Blend into 'score' and record debug fields
+    for res, raw, ns in zip(head, ce_raw.tolist(), ce_norm.tolist()):
+        b = float(res.get("score", 0.0))
+        res["base_score"] = b
         res["ce_score"] = float(raw)
-        res["base_score"] = res.get("score", 0.0)  # optional for debugging
-        res["score"] = res["base_score"] + ce_weight * float(ns)
+        res["score"] = b + ce_weight * ns
 
-    # 5) Global sort (head + tail) by unified _score
-    # Tail items keep their original _score/base_score
-    #combined = head + tail
-    combined = head
-    combined.sort(key=lambda r: r.get("_score", base_score(r)), reverse=True)
-    return combined
+    # 5) Return the top-k head re-sorted by blended score
+    head.sort(key=lambda r: r.get("score", 0.0), reverse=True)
+    return head
+
 
 
 def get_data_from_vector_id(store: Store, vector_id: int) -> Optional[Dict[str, Any]]:

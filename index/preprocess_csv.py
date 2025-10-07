@@ -81,10 +81,12 @@ def preprocess(csv_path, output_path):
 
 def balanced_sample(csv_path, output_path, max_rows):
     df = pd.read_csv(csv_path, engine="python")
-    counts = df['label'].value_counts(sort=False)
+    counts = df["label"].value_counts(sort=False)
     rows_per_label = max_rows // len(VALID_LABELS)
     rows_per_label = int(min(rows_per_label, counts.min()))
-    sampled = df.groupby('label', group_keys=False).sample(n=rows_per_label, random_state=SEED)
+    sampled = df.groupby("label", group_keys=False).sample(
+        n=rows_per_label, random_state=SEED
+    )
     sampled = sampled.sample(frac=1, random_state=SEED).reset_index(drop=True)
     sampled.to_csv(output_path, index=False)
     return sampled

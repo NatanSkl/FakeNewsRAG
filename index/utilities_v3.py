@@ -52,6 +52,7 @@ def make_vector_id(db_id: str, counter: List[int]) -> int:
     counter[0] += 1
     return counter[0]
 
+
 class MetadataSink:
     def __init__(self, path: str, append: bool = False) -> None:
         self.path = path

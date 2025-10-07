@@ -147,7 +147,6 @@ def make_index(dim: int, args: argparse.Namespace) -> faiss.Index:
     if args.index_type.startswith("HNSW"):
         return faiss.IndexHNSWFlat(dim, args.hnsw_m, metric)
 
-
     flat = faiss.IndexFlatIP(dim) if use_ip else faiss.IndexFlatL2(dim)
     ngpu = faiss.get_num_gpus()
 

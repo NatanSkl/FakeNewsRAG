@@ -292,6 +292,144 @@ def deduplicate(results: List[Dict[str, Any]], score_key: str = "score") -> List
     
     return deduplicated
 
+
+def filter_label(results: List[Dict[str, Any]], label: str) -> List[Dict[str, Any]]:
+    """
+    Filter results to keep only those with the specified label.
+    
+    Args:
+        results: List of result dictionaries from query_once or other retrieval functions
+        label: Label to filter by (e.g., "real", "fake")
+        
+    Returns:
+        List of results that have the specified label
+    """
+    if not results:
+        return results
+    
+    filtered = []
+    for result in results:
+        if result.get("label") == label:
+            filtered.append(result)
+    
+    return filtered
+
+
+def retrieve_evidence(store: Store,
+                      article_text: str,
+                      label_name: str,
+                      ce_model,
+                      diversity_type,
+                      k: int,
+                      verbose: bool = False) -> List[Dict[str, Any]]:
+    """
+    Retrieve evidence for an article with optional cross-encoder reranking and diversity.
+    
+    Args:
+        store: Store object containing index, model, and metadata
+        article_text: Article text to find evidence for
+        label_name: Label to filter by (e.g., "real", "fake")
+        ce_model: Cross-encoder model for reranking (None to skip)
+        diversity_type: Diversity method ("mmr" or None to skip)
+        k: Number of final results to return
+        verbose: If True, print progress information
+        
+    Returns:
+        List of evidence results with optional reranking and diversification
+    """
+    if verbose:
+        print(f"Starting evidence retrieval for label: {label_name}")
+        print(f"Article text: {article_text[:100]}...")
+    
+    # Step 1: Perform initial query
+    if verbose:
+        print("Step 1: Performing initial query...")
+    
+    # Use a larger k for initial retrieval to account for filtering and diversification
+    initial_k = max(k * 3, 150)  # Retrieve 3x more than needed, minimum 50
+    results = query_once(store, article_text, k=initial_k)
+    
+    if verbose:
+        print(f"Retrieved {len(results)} initial results")
+    
+    # Step 2: Deduplicate results
+    if verbose:
+        print("Step 2: Deduplicating results...")
+    
+    results = deduplicate(results)
+    
+    if verbose:
+        print(f"After deduplication: {len(results)} results")
+    
+    # Step 3: Filter by label
+    if verbose:
+        print(f"Step 3: Filtering by label '{label_name}'...")
+    
+    results = filter_label(results, label_name)
+    
+    if verbose:
+        print(f"After label filtering: {len(results)} results")
+    
+    if not results:
+        if verbose:
+            print("No results found after filtering, returning empty list")
+        return []
+    
+    # Step 4: Cross-encoder reranking (if model provided)
+    if ce_model is not None:
+        if verbose:
+            print("Step 4: Applying cross-encoder reranking...")
+        
+        try:
+            results = cross_encoder_rerank(
+                cross_enc=ce_model,
+                query_text=article_text,
+                results=results,
+                ce_topk=min(len(results), k * 2),  # Rerank up to 2x final k
+                ce_weight=1.0,
+                batch_size=8
+            )
+            
+            if verbose:
+                print(f"After cross-encoder reranking: {len(results)} results")
+                
+        except Exception as e:
+            if verbose:
+                print(f"Cross-encoder reranking failed: {e}")
+            # Continue without reranking if it fails
+    
+    # Step 5: Diversity (if requested)
+    if diversity_type is not None and diversity_type.lower() == "mmr":
+        if verbose:
+            print("Step 5: Applying MMR diversification...")
+        
+        try:
+            results = mmr_diversify(
+                store=store,
+                query_text=article_text,
+                results=results,
+                top_k=k,
+                lambda_mmr=0.5,
+                content_key="content"
+            )
+            
+            if verbose:
+                print(f"After MMR diversification: {len(results)} results")
+                
+        except Exception as e:
+            if verbose:
+                print(f"MMR diversification failed: {e}")
+            # Continue without diversification if it fails
+    
+    # Step 6: Return top k results
+    final_results = results[:k]
+    
+    if verbose:
+        print(f"Final results: {len(final_results)} evidence items")
+        print("Evidence retrieval completed successfully!")
+    
+    return final_results
+
 # ----------------------------
 # Utility helpers
 # ----------------------------

@@ -48,7 +48,7 @@ def save_args(args: argparse.Namespace, path: str, file: str) -> None:
         json.dump(args_dict, f, ensure_ascii=False, indent=4)
 
 
-def make_vector_id(db_id:str, counter: List[int]) -> int:
+def make_vector_id(db_id: str, counter: List[int]) -> int:
     counter[0] += 1
     return counter[0]
 
@@ -104,7 +104,7 @@ class CSVSink(MetadataSink):
     def write(self, rows: dict) -> None:
         if not rows:
             return
-        with open (self.path, "a", encoding="utf-8") as f:
+        with open(self.path, "a", encoding="utf-8") as f:
             writer = csv.DictWriter(f, ["vector_id", "db_id"])
             if not self.header_written:
                 writer.writeheader()

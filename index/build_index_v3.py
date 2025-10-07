@@ -1,33 +1,15 @@
 import os
-import argparse
-import pickle
 import time
-from typing import List, Tuple, Dict, Any
-
+import faiss
+import torch
+import pickle
+import argparse
+import tiktoken
+import numpy as np
 import utilities_v3 as utils
-
-try:
-    import faiss
-    import torch
-    import tiktoken
-    import numpy as np
-    import pandas as pd
-    from tqdm import tqdm
-    from rank_bm25 import BM25Okapi
-    from sentence_transformers import SentenceTransformer
-except ImportError:
-    print("[WARN] Missing dependencies. Installing now.")
-    os.system(
-        "pip install torch rank-bm25 tiktoken sentence_transformers pandas numpy tqdm pyarrow"
-    )
-    import faiss
-    import torch
-    import tiktoken
-    import numpy as np
-    import pandas as pd
-    from tqdm import tqdm
-    from rank_bm25 import BM25Okapi
-    from sentence_transformers import SentenceTransformer
+from typing import List, Tuple
+from rank_bm25 import BM25Okapi
+from sentence_transformers import SentenceTransformer
 
 
 COLUMNS = ["id", "label", "title", "content"]
@@ -73,11 +55,11 @@ def parse_args() -> argparse.Namespace:
 
     # IVF / PQ / HNSW parameters
     parser.add_argument(
-        "--train-sample", type=int, default=10**6
+        "--train-sample", type=int, default=7.5e4
     )  # sample size for training
-    parser.add_argument("--nlist", type=int, default=16384)  # IVF: number of centroids
-    parser.add_argument("--nprobe", type=int, default=32)  # IVF: search probes
-    parser.add_argument("--pq-m", type=int, default=32)  # IVFPQ: sub-vectors
+    parser.add_argument("--nlist", type=int, default=1024)  # IVF: number of centroids
+    parser.add_argument("--nprobe", type=int, default=16)  # IVF: search probes
+    parser.add_argument("--pq-m", type=int, default=16)  # IVFPQ: sub-vectors
     parser.add_argument("--pq-bits", type=int, default=8)  # IVFPQ: bits per code
     parser.add_argument("--hnsw-m", type=int, default=32)  # HNSW: Neighbor degree
 
@@ -146,104 +128,56 @@ def embed_batches(
     return result
 
 
-def make_index_gpu(dim: int, args) -> faiss.Index:
+def make_index(dim: int, args: argparse.Namespace) -> faiss.Index:
     """
-    Returns a FAISS index that is already on GPU (so train/add/search happen on GPU)
-    when supported. HNSW remains CPU (FAISS has no GPU HNSW).
-
-    Expected args:
-      - index_type: str  (e.g., "FlatIP", "FlatL2", "IVF1024,Flat", "IVFPQ", etc.)
-      - nlist: int       (for IVF/IVFPQ)
-      - pq_m: int        (for IVFPQ)
-      - pq_bits: int     (for IVFPQ, e.g., 8)
-      - hnsw_m: int      (for HNSW)
-      - shard: bool      (True=shard across GPUs, False=replicate)
-      - use_float16: bool (optional; default True for GPU speed)
+    Create a FAISS index, automatically using GPU if available.
+    Falls back to CPU if GPU is not available.
     """
     use_ip = "IP" in args.index_type
     metric = faiss.METRIC_INNER_PRODUCT if use_ip else faiss.METRIC_L2
 
-    # how many GPUs FAISS can see
-    ngpu = faiss.get_num_gpus()
-
-    # helper to configure multi-GPU cloning
-    def _multi_opts():
+    # Helper for multi-GPU options
+    def _multi_gpu_opts():
         co = faiss.GpuMultipleClonerOptions()
-        co.shard = bool(getattr(args, "shard", False))  # shard or replicate
+        co.shard = bool(getattr(args, "shard", False))
         co.useFloat16 = bool(getattr(args, "use_float16", True))
-        # co.usePrecomputed = True  # enable if you precompute PQ tables
         return co
+
+    # ---------- HNSW (CPU only) ----------
+    if args.index_type.startswith("HNSW"):
+        return faiss.IndexHNSWFlat(dim, args.hnsw_m, metric)
+
+
+    flat = faiss.IndexFlatIP(dim) if use_ip else faiss.IndexFlatL2(dim)
+    ngpu = faiss.get_num_gpus()
 
     # ---------- FLAT ----------
     if args.index_type.startswith("Flat"):
+        # Move to GPU if available
         if ngpu > 0:
+            print("[INFO] Moving index to GPU")
             res = faiss.StandardGpuResources()
-            if use_ip:
-                return faiss.GpuIndexFlatIP(res, dim)
-            else:
-                return faiss.GpuIndexFlatL2(res, dim)
-        # fallback CPU if no GPU visible
-        return faiss.IndexFlatIP(dim) if use_ip else faiss.IndexFlatL2(dim)
-
-    # ---------- IVF (no PQ) ----------
-    if args.index_type.startswith("IVF") and "PQ" not in args.index_type:
-        # build CPU structure, then wrap as GPU BEFORE train()
-        quantizer = faiss.IndexFlatIP(dim) if use_ip else faiss.IndexFlatL2(dim)
-        cpu_index = faiss.IndexIVFFlat(quantizer, dim, args.nlist, metric)
-        if ngpu > 0:
-            # move to GPU now; train/add/search will run on GPU
-            if ngpu == 1:
-                res = faiss.StandardGpuResources()
-                return faiss.index_cpu_to_gpu(res, 0, cpu_index)
-            else:
-                return faiss.index_cpu_to_all_gpus(cpu_index, co=_multi_opts())
-        return cpu_index
-
-    # ---------- IVFPQ ----------
-    if args.index_type.startswith("IVFPQ"):
-        quantizer = faiss.IndexFlatIP(dim) if use_ip else faiss.IndexFlatL2(dim)
-        cpu_index = faiss.IndexIVFPQ(
-            quantizer, dim, args.nlist, args.pq_m, args.pq_bits, metric
-        )
-        if ngpu > 0:
-            print("Faiss GPU is available")
-            if ngpu == 1:
-                res = faiss.StandardGpuResources()
-                return faiss.index_cpu_to_gpu(res, 0, cpu_index)
-            else:
-                return faiss.index_cpu_to_all_gpus(cpu_index, co=_multi_opts())
-        return cpu_index
-
-    # ---------- HNSW (CPU only in FAISS) ----------
-    if args.index_type.startswith("HNSW"):
-        m = args.hnsw_m
-        if metric == faiss.METRIC_INNER_PRODUCT:
-            return faiss.IndexHNSWFlat(dim, m, faiss.METRIC_INNER_PRODUCT)
-        else:
-            return faiss.IndexHNSWFlat(dim, m, faiss.METRIC_L2)
-
-    raise ValueError(f"[ERROR] Unsupported index type: {args.index_type}")
-
-
-def make_index(dim: int, args: argparse.Namespace) -> faiss.Index:
-    use_ip = "IP" in args.index_type
-    metric = faiss.METRIC_INNER_PRODUCT if use_ip else faiss.METRIC_L2
-    flat = faiss.IndexFlatIP(dim) if use_ip else faiss.IndexFlatL2(dim)
-
-    if args.index_type.startswith("Flat"):
+            return faiss.index_cpu_to_gpu(res, 0, flat)
         return flat
 
-    if args.index_type.startswith("IVF") and "PQ" not in args.index_type:
-        return faiss.IndexIVFFlat(flat, dim, args.nlist, metric)
+    # ---------- IVF / PQ----------
+    if args.index_type.startswith("IVF"):
+        if "PQ" not in args.index_type:
+            cpu_index = faiss.IndexIVFFlat(flat, dim, args.nlist, metric)
+        else:
+            cpu_index = faiss.IndexIVFPQ(
+                flat, dim, args.nlist, args.pq_m, args.pq_bits, metric
+            )
 
-    if args.index_type.startswith("IVFPQ"):
-        return faiss.IndexIVFPQ(flat, dim, args.nlist, args.pq_m, args.pq_bits, metric)
-
-    if args.index_type.startswith("HNSW") and metric == faiss.METRIC_INNER_PRODUCT:
-        return faiss.IndexHNSWFlat(dim, args.hnsw_m, faiss.METRIC_INNER_PRODUCT)
-
-    if args.index_type.startswith("HNSW"):
-        return faiss.IndexHNSWFlat(dim, args.hnsw_m, faiss.METRIC_L2)
+        # Move to GPU if available
+        if ngpu > 0:
+            print("[INFO] Moving index to GPU")
+            if ngpu == 1:
+                res = faiss.StandardGpuResources()
+                return faiss.index_cpu_to_gpu(res, 0, cpu_index)
+            else:
+                return faiss.index_cpu_to_all_gpus(cpu_index, co=_multi_gpu_opts())
+        return cpu_index
 
     raise ValueError(f"[ERROR] Unsupported index type: {args.index_type}")
 
@@ -275,15 +209,32 @@ def build_index(
     args: argparse.Namespace, model: SentenceTransformer
 ) -> Tuple[faiss.Index, int]:
     print("[DEBUG] build_index function started")
+
+    # Check GPU availability
+    ngpu = faiss.get_num_gpus()
+    if ngpu > 0:
+        print(f"[INFO] FAISS GPU support detected: {ngpu} GPU(s) available")
+    else:
+        print("[INFO] FAISS GPU support not available, using CPU")
+
     print("[DEBUG] About to call infer_dim")
     dim = infer_dim(args, model)
     print(f"[DEBUG] infer_dim completed, dimension: {dim}")
+
     print("[DEBUG] About to call make_index")
     pre_index = make_index(dim, args)
     print("[DEBUG] make_index completed successfully")
 
-    # IVF / IVFPQ, if picked as index type
+    # Determine if we have an IVF-based index that needs training
+    needs_training = False
     if isinstance(pre_index, faiss.IndexIVF):
+        needs_training = True
+    elif hasattr(pre_index, "index") and isinstance(pre_index.index, faiss.IndexIVF):
+        # GPU-wrapped IVF index
+        needs_training = True
+
+    # IVF / IVFPQ training (automatically happens on GPU if index is on GPU)
+    if needs_training:
         print("[DEBUG] Index is IVF type, starting training sample collection")
         # Collect training sample
         sample_vectors: List[np.ndarray] = []
@@ -322,21 +273,35 @@ def build_index(
             if total_sampled >= args.train_sample:
                 print("[DEBUG] Reached training sample limit, breaking")
                 break
+
         if not sample_vectors:
             raise RuntimeError(
                 "[ERROR] Failed to sample vectors for IVF / IVFPQ training."
             )
+
         print(f"[DEBUG] Training matrix shape: {len(sample_vectors)} vectors")
         train_matrix = np.vstack(sample_vectors).astype(np.float32)
         print(f"[DEBUG] About to train index with matrix shape: {train_matrix.shape}")
+
+        # Train (automatically on GPU if index is on GPU)
         pre_index.train(train_matrix)
-        print("[DEBUG] Index training completed")
+        training_location = "GPU" if ngpu > 0 else "CPU"
+        print(f"[INFO] Index training completed on {training_location}")
 
     # wrap pre_index with IDMap
     print("[DEBUG] Wrapping index with IDMap")
     index = faiss.IndexIDMap2(pre_index)
-    if isinstance(pre_index, faiss.IndexIVF):
-        pre_index.nprobe = args.nprobe
+
+    # Set nprobe for IVF indices
+    if needs_training:
+        if isinstance(pre_index, faiss.IndexIVF):
+            pre_index.nprobe = args.nprobe
+        elif hasattr(pre_index, "index") and isinstance(
+            pre_index.index, faiss.IndexIVF
+        ):
+            pre_index.index.nprobe = args.nprobe
+        print(f"[DEBUG] Set nprobe={args.nprobe}")
+
     print("[DEBUG] build_index function completed successfully")
     return index, dim
 
@@ -498,10 +463,10 @@ def main() -> None:
         print(f"[DEBUG] Using GPU: {torch.cuda.get_device_name(0)}")
     elif torch.backends.mps.is_available():
         device = "mps"
-        print("[DEBUG] Using MPS (Apple Silicon)")
+        print("[DEBUG] Using MPS (Apple Silicon) - FAISS will use CPU")
     else:
         device = "cpu"
-    #    print("[DEBUG] Using CPU")
+
     # Initialize tokenizer and model
     encoder = tiktoken.get_encoding(args.encoding)
     model = SentenceTransformer(args.model, device=device)

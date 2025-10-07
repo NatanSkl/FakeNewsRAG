@@ -1,3 +1,5 @@
+import math
+
 import pandas as pd
 import utilities_v3 as utils
 import argparse
@@ -8,6 +10,7 @@ import re
 
 
 CHUNK_SIZE = 100000
+BALANCED_SIZE = 3e5
 SEED = 404
 VALID_LABELS = ["fake", "reliable"]  # TODO: adapt for multiple labels
 csv.field_size_limit(sys.maxsize)
@@ -20,6 +23,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out-dir", default="data")
     parser.add_argument("--test-split", type=float, default=0.05)
     parser.add_argument("--val-split", type=float, default=0.05)
+    parser.add_argument("--skip-preprocessing", action="store_true")
+    parser.add_argument("--skip-balancing", action="store_true")
 
     args = parser.parse_args()
     utils.save_args(args, args.out_dir, "preprocess_csv")
@@ -74,8 +79,18 @@ def preprocess(csv_path, output_path):
             del chunk, new_chunk
 
 
+def balanced_sample(csv_path, output_path, max_rows):
+    df = pd.read_csv(csv_path, engine="python")
+    counts = df['label'].value_counts(sort=False)
+    rows_per_label = max_rows // len(VALID_LABELS)
+    rows_per_label = int(min(rows_per_label, counts.min()))
+    sampled = df.groupby('label', group_keys=False).sample(n=rows_per_label, random_state=SEED)
+    sampled = sampled.sample(frac=1, random_state=SEED).reset_index(drop=True)
+    sampled.to_csv(output_path, index=False)
+    return sampled
+
+
 def split(csv_path, output_dir, test_split, validation_split):
-    row_count = 0
     train_out = os.path.join(output_dir, "train.csv")
     test_out = os.path.join(output_dir, "test.csv")
     val_out = os.path.join(output_dir, "val.csv")
@@ -113,8 +128,12 @@ def split(csv_path, output_dir, test_split, validation_split):
 def main():
     args = parse_args()
     filepath = os.path.join(args.out_dir, "news_preprocessed.csv")
-    preprocess(args.input, filepath)
-    split(filepath, args.out_dir, args.test_split, args.val_split)
+    filepath_2 = os.path.join(args.out_dir, "news_balanced.csv")
+    if not args.skip_preprocessing:
+        preprocess(args.input, filepath)
+    if not args.skip_balancing:
+        balanced_sample(filepath, filepath_2, BALANCED_SIZE)
+    split(filepath_2, args.out_dir, args.test_split, args.val_split)
 
 
 if __name__ == "__main__":

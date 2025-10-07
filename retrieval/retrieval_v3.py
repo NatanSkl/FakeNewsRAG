@@ -36,6 +36,15 @@ class Store:
     ce_model: Optional[CrossEncoder] = None  # Optional cross-encoder model
 
 
+@dataclass
+class RetrievalConfig:
+    """Configuration for retrieval operations - compatibility class for v3 interface."""
+    k: int = 10  # Number of results to return
+    ce_model: Optional[CrossEncoder] = None  # Cross-encoder model for reranking
+    diversity_type: Optional[str] = None  # Diversity method ("mmr" or None)
+    verbose: bool = False  # Verbose output
+
+
 def simple_tokenizer(text: str) -> List[str]:
     """Simple tokenizer that matches the BM25 corpus building process.
     
@@ -346,7 +355,7 @@ def retrieve_evidence(store: Store,
         print("Step 1: Performing initial query...")
     
     # Use a larger k for initial retrieval to account for filtering and diversification
-    initial_k = max(k * 3, 150)  # Retrieve 3x more than needed, minimum 50
+    initial_k = max(k * 3, 50)  # Retrieve 3x more than needed, minimum 50
     results = query_once(store, article_text, k=initial_k)
     
     if verbose:

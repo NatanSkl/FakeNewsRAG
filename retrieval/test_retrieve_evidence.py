@@ -205,7 +205,7 @@ def main():
         store = load_store(args.store_dir, verbose=not args.quiet)
         print(f"Store loaded successfully with {store.index.ntotal} vectors")
         
-        verbose = not args.quiet
+        verbose = True
         
         if args.edge_cases:
             success = test_retrieve_evidence_edge_cases(store, verbose)

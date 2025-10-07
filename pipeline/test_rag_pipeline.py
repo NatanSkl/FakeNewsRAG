@@ -172,7 +172,7 @@ def test_multiple_articles():
         result = test_rag_pipeline(
             article_title=article["title"],
             article_content=article["content"],
-            store_path="../index/store_slice",
+            store_path="/StudentData/slice",
             llm_url="http://127.0.0.1:8010",
             llm_type="llama",
             verbose=True

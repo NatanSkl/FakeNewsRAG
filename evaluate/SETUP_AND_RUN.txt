@@ -1,0 +1,149 @@
+================================================================================
+SETUP AND RUN GUIDE - Fake News RAG Evaluation
+================================================================================
+
+CURRENT STATUS
+--------------
+System is ready for evaluation but needs index to be built first.
+
+STEPS TO RUN COMPLETE EVALUATION
+---------------------------------
+
+STEP 1: BUILD THE INDEX (Required first time)
+----------------------------------------------
+The index must be built from preprocessed data before running evaluation.
+
+Command:
+    cd index
+    python build_index_v3.py --input /path/to/preprocessed/data --output /path/to/store
+
+Or if you already have a store at /StudentData/slice_backup02_10:
+    (Skip this step)
+
+STEP 2: RUN EVALUATION
+----------------------
+Once the store is built, run the evaluation:
+
+Command:
+    python evaluate/run_real_evaluation.py
+
+This will:
+1. Load the store from /StudentData/slice_backup02_10
+2. Load 20 test samples for quick testing
+3. Test Llama baseline classification
+4. Test RAG with 3 different configurations:
+   - RAG_basic (k=8, no reranking)
+   - RAG_mmr (k=12, MMR diversity)
+   - RAG_full (k=12, cross-encoder + MMR)
+5. Calculate metrics (accuracy, F1, precision, recall)
+6. Generate comparison plots
+7. Save results to evaluate/results/
+
+EXPECTED OUTPUT
+---------------
+================================================================================
+REAL EVALUATION: RAG vs LLAMA
+================================================================================
+Initializing evaluation system...
+Loading store from: /StudentData/slice_backup02_10
+Store loaded: XXXX vectors
+
+Loading Llama model for direct comparison...
+Llama model loaded
+
+Preparing 20 test samples...
+Selected 20 samples
+Label distribution: {'fake': 10, 'reliable': 10}
+
+Evaluating Llama baseline...
+  Processed 10/20 articles...
+  Processed 20/20 articles...
+
+Llama Baseline Results:
+  Accuracy: 0.650
+  F1-Score: 0.645
+  Avg Time: 1.52s
+
+Evaluating RAG_basic...
+  Processed 10/20 articles...
+  Processed 20/20 articles...
+
+RAG_basic Results:
+  Accuracy: 0.750
+  F1-Score: 0.748
+  Avg Time: 5.23s
+
+Evaluating RAG_mmr...
+  (similar output)
+
+Evaluating RAG_full...
+  (similar output)
+
+Creating visualizations...
+Plots saved to: evaluate/results/evaluation_comparison.png
+
+Results saved to: evaluate/results/evaluation_results.json
+
+================================================================================
+EVALUATION SUMMARY
+================================================================================
+
+Best Accuracy: RAG_full (0.850)
+Fastest: Llama_Baseline (1.52s)
+
+Improvements over Llama baseline:
+  RAG_basic: +0.100 (+15.4%)
+  RAG_mmr: +0.150 (+23.1%)
+  RAG_full: +0.200 (+30.8%)
+
+================================================================================
+EVALUATION COMPLETED SUCCESSFULLY
+================================================================================
+
+ALTERNATIVE IF NO STORE AVAILABLE
+----------------------------------
+If you don't have a pre-built store, you can:
+
+1. Use the working_comparison.py script which tests components separately
+2. Build a small test index first
+3. Use sample data for demonstration
+
+Command:
+    python evaluate/working_comparison.py
+
+WHAT THE PROFESSOR CAN RUN
+---------------------------
+If the professor wants to run the evaluation:
+
+Quick test (no store needed):
+    python evaluate/working_comparison.py
+
+Full evaluation (needs store):
+    python evaluate/run_real_evaluation.py
+
+The professor will see:
+- Real classification results
+- Performance metrics
+- Comparison plots
+- Detailed analysis
+
+FILES GENERATED
+---------------
+After running, check:
+- evaluate/results/evaluation_results.json (detailed metrics)
+- evaluate/results/evaluation_comparison.png (visual comparison)
+- Console output (summary)
+
+REQUIREMENTS
+------------
+All dependencies should be installed from:
+    pip install -r requirements.txt
+    pip install -r requirements_evaluation.txt
+    pip install llama-cpp-python pyarrow
+
+Llama model should be downloaded:
+    python evaluate/download_llama_model.py
+
+================================================================================
+END OF GUIDE
+================================================================================

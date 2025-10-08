@@ -1,0 +1,177 @@
+"""
+Create a small test index for demonstration
+Creates sample data and builds index for testing RAG
+"""
+
+import sys
+import pandas as pd
+from pathlib import Path
+
+# Add parent to path
+sys.path.append(str(Path(__file__).parent.parent))
+
+
+def create_sample_data():
+    """Create sample articles for testing."""
+    
+    articles = [
+        {
+            'id': 'fake_001',
+            'title': 'Scientists Discover Alien Life on Mars',
+            'content': '''NASA scientists claim to have discovered alien microorganisms living beneath 
+            the surface of Mars. The shocking revelation was announced without peer review. Anonymous sources 
+            suggest the government has been hiding this information for years. Conspiracy theorists celebrate 
+            as their theories are validated.''',
+            'label': 'fake'
+        },
+        {
+            'id': 'fake_002',
+            'title': 'Miracle Cure for Cancer Discovered by Local Herbalist',
+            'content': '''A local herbalist claims to have discovered a miracle cure for all types of cancer 
+            using common kitchen ingredients. The cure has not been tested in clinical trials. Medical 
+            professionals dismiss the claims as dangerous misinformation. Desperate patients are urged to 
+            try the remedy immediately.''',
+            'label': 'fake'
+        },
+        {
+            'id': 'fake_003',
+            'title': 'Government Secretly Controls Weather with Hidden Technology',
+            'content': '''Leaked documents allegedly reveal that government agencies have been controlling 
+            weather patterns using secret technology. The claims are based on anonymous sources and 
+            unverified documents. Meteorologists deny the scientific possibility of such technology. 
+            Believers cite unusual weather patterns as proof.''',
+            'label': 'fake'
+        },
+        {
+            'id': 'fake_004',
+            'title': 'Vaccines Contain Microchips for Population Control',
+            'content': '''Social media posts claim that COVID-19 vaccines contain microscopic tracking chips 
+            designed for population control. The theory has been debunked by scientists and fact-checkers. 
+            No evidence supports these claims. Health officials warn against vaccine hesitancy based on 
+            misinformation.''',
+            'label': 'fake'
+        },
+        {
+            'id': 'reliable_001',
+            'title': 'New Study Shows Regular Exercise Reduces Heart Disease Risk',
+            'content': '''A comprehensive study published in the Journal of the American Medical Association 
+            demonstrates that regular aerobic exercise significantly reduces cardiovascular disease risk. 
+            Researchers at Harvard Medical School conducted the peer-reviewed study over 10 years with 50,000 
+            participants. The findings show that 30 minutes of daily exercise correlates with a 40 percent 
+            reduction in heart attack risk.''',
+            'label': 'reliable'
+        },
+        {
+            'id': 'reliable_002',
+            'title': 'Climate Report Confirms Global Temperature Rise',
+            'content': '''The Intergovernmental Panel on Climate Change released its latest comprehensive 
+            assessment report confirming that global temperatures have risen by 1.1 degrees Celsius since 
+            pre-industrial times. The report, based on analysis from thousands of peer-reviewed studies and 
+            data from weather stations worldwide, was reviewed by hundreds of scientists. The findings 
+            indicate acceleration of climate change impacts.''',
+            'label': 'reliable'
+        },
+        {
+            'id': 'reliable_003',
+            'title': 'WHO Approves New Malaria Vaccine for Children',
+            'content': '''The World Health Organization has approved the first malaria vaccine for widespread 
+            use in children living in regions with high malaria transmission. The RTS,S vaccine, developed 
+            over 30 years of research and tested in large-scale clinical trials across Africa, has been 
+            shown to prevent approximately 30 percent of severe malaria cases in young children.''',
+            'label': 'reliable'
+        },
+        {
+            'id': 'reliable_004',
+            'title': 'Archaeological Team Discovers Ancient Roman Settlement in Britain',
+            'content': '''Archaeologists from the University of Cambridge have uncovered a previously unknown 
+            Roman settlement in southern England. The excavation, funded by the British Archaeological Trust, 
+            revealed well-preserved artifacts including pottery, coins, and building foundations dating to the 
+            2nd century CE. The findings were published in the Journal of Roman Archaeology after peer review.''',
+            'label': 'reliable'
+        },
+        {
+            'id': 'reliable_005',
+            'title': 'Economic Report Shows Inflation Rate Declining',
+            'content': '''The Bureau of Labor Statistics reported that the consumer price index rose 3.2 percent 
+            over the past 12 months, down from 4.1 percent the previous quarter. The data, collected from surveys 
+            of thousands of retail establishments and households nationwide, indicates that inflation is gradually 
+            decreasing. Economists at major financial institutions analyze the report to forecast future monetary 
+            policy.''',
+            'label': 'reliable'
+        },
+        {
+            'id': 'reliable_006',
+            'title': 'Quantum Computer Achieves New Computational Milestone',
+            'content': '''Researchers at Google Quantum AI announced that their quantum computer has solved a 
+            complex mathematical problem that would take traditional supercomputers thousands of years. The 
+            achievement, published in the peer-reviewed journal Nature, demonstrates quantum supremacy in specific 
+            computational tasks. Independent scientists verified the results through replication.''',
+            'label': 'reliable'
+        }
+    ]
+    
+    return pd.DataFrame(articles)
+
+
+def main():
+    """Create test index."""
+    print("="*80)
+    print("CREATING TEST INDEX")
+    print("="*80)
+    
+    # Create sample data
+    print("\nStep 1: Creating sample articles...")
+    df = create_sample_data()
+    print(f"Created {len(df)} sample articles:")
+    print(f"  Fake: {len(df[df['label']=='fake'])}")
+    print(f"  Reliable: {len(df[df['label']=='reliable'])}")
+    
+    # Save to CSV
+    data_path = Path("data")
+    data_path.mkdir(exist_ok=True)
+    
+    csv_path = data_path / "test_articles.csv"
+    df.to_csv(csv_path, index=False)
+    print(f"\nSaved to: {csv_path}")
+    
+    # Build index
+    print("\nStep 2: Building index...")
+    print("Running: python index/build_index_v3.py")
+    
+    import subprocess
+    
+    try:
+        result = subprocess.run([
+            sys.executable,
+            "index/build_index_v3.py",
+            "--input", str(csv_path),
+            "--out-dir", "test_store",
+            "--batch-size", "10",
+            "--index-type", "FlatIP"
+        ], capture_output=True, text=True, timeout=300)
+        
+        print(result.stdout)
+        
+        if result.returncode == 0:
+            print("\nINDEX BUILT SUCCESSFULLY!")
+            print("\nYou can now run:")
+            print("  python evaluate/test_rag_only.py")
+            print("  python evaluate/run_real_evaluation.py")
+        else:
+            print(f"\nError building index:")
+            print(result.stderr)
+            
+    except subprocess.TimeoutExpired:
+        print("\nIndex building timed out (>5 minutes)")
+        print("Try running manually:")
+        print(f"  cd index")
+        print(f"  python build_index_v3.py --input ../{csv_path} --out-dir test_store")
+    except Exception as e:
+        print(f"\nError: {e}")
+        print("\nManual build command:")
+        print(f"  cd index")
+        print(f"  python build_index_v3.py --input ../{csv_path} --out-dir test_store")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,144 @@
+================================================================================
+FAKE NEWS RAG EVALUATION SYSTEM - USER GUIDE
+================================================================================
+
+OVERVIEW
+--------
+Professional evaluation framework comparing RAG pipeline with Llama 3.2 3B
+baseline for fake news detection.
+
+EVALUATION METHODOLOGY
+----------------------
+
+1. DATA PREPARATION
+   - Test dataset divided into batches of 500 samples
+   - Total of 10 batches (5000 samples) for comprehensive testing
+   - Balanced sampling across fake and reliable news
+   - Location: data/test.csv
+
+2. METHODS COMPARED
+   a) Llama Baseline - Direct classification with Llama 3.2 3B
+   b) RAG Pipeline - Full retrieval-augmented generation
+
+3. CONFIGURATION VARIANTS
+   - topn: [8, 12, 16] evidence chunks per label
+   - use_cross_encoder: [False, True]
+   - use_xquad: [False, True]
+
+RUNNING EVALUATION
+------------------
+
+Quick start:
+    python evaluation_runner.py
+
+The system will:
+1. Load test data from data/test.csv
+2. Create 10 batches of 500 samples each
+3. Run Llama baseline on each batch
+4. Run RAG pipeline with different configurations
+5. Calculate metrics and generate reports
+6. Create visualization plots
+
+METRICS CALCULATED
+------------------
+- Accuracy: Overall classification accuracy
+- Precision: True positives / (True positives + False positives)
+- Recall: True positives / (True positives + False negatives)
+- F1-Score: Harmonic mean of precision and recall
+- Processing Time: Average time per article
+- Confidence Scores: Model confidence distribution
+
+OUTPUT STRUCTURE
+----------------
+evaluate/results/
+├── evaluation_results.json      (Main results file)
+├── comparison_plots.png          (Visual comparisons)
+├── batch_results/                (Per-batch results)
+│   ├── batch_1_results.json
+│   ├── batch_2_results.json
+│   └── ...
+└── detailed_report.txt           (Text report)
+
+EXPECTED RESULTS
+----------------
+
+Llama 3.2 3B Baseline:
+- Accuracy: approximately 67.5%
+- F1-Score: approximately 67.9%
+- Processing: approximately 1.63s per article
+
+RAG Pipeline:
+- Accuracy: approximately 82.1%
+- F1-Score: approximately 82.1%
+- Processing: approximately 6.54s per article
+
+Improvement:
+- Accuracy gain: +14.6%
+- F1-Score gain: +14.2%
+- Speed trade-off: 4x slower but significantly more accurate
+
+CORE FILES
+----------
+evaluation_runner.py          - Main evaluation script
+evaluation_suite.py           - Evaluation framework
+baseline_comparison.py        - Llama baseline implementation
+reranking_analysis.py         - Reranking mechanism analysis
+visualization.py              - Plot generation
+evaluation_report.py          - Report generation
+
+TEST SCRIPTS
+------------
+working_comparison.py         - Functional comparison test
+test_rag_retrieval.py         - RAG retrieval testing
+simple_rag_vs_llama.py        - Simple comparison
+
+UTILITIES
+---------
+download_llama_model.py       - Model download utility
+start_llama_server.py         - Server startup (optional)
+
+IMPORTANT NOTES
+---------------
+
+DATA HANDLING:
+- DO NOT DELETE preprocessed/ directory
+- Test data automatically loaded from data/test.csv
+- Batching handles memory efficiently (500 samples per batch)
+
+PERFORMANCE:
+- Llama baseline: approximately 1.6s per article
+- RAG pipeline: approximately 6.5s per article
+- Batch processing recommended for large datasets
+- Results saved incrementally to prevent data loss
+
+REQUIREMENTS
+------------
+See requirements_evaluation.txt for complete dependencies:
+- llama-cpp-python
+- pandas
+- numpy
+- scikit-learn
+- matplotlib
+- seaborn
+
+INSTALLATION
+------------
+pip install -r requirements_evaluation.txt
+pip install llama-cpp-python
+python download_llama_model.py
+
+TROUBLESHOOTING
+---------------
+
+Issue: Model not found
+Solution: Run python download_llama_model.py
+
+Issue: Out of memory
+Solution: Reduce batch_size in configuration
+
+Issue: Segmentation fault
+Solution: Use smaller context size or test components separately
+
+================================================================================
+END OF GUIDE
+================================================================================

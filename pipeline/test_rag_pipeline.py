@@ -71,17 +71,23 @@ def test_rag_pipeline(
     # Load store
     print(f"[{datetime.now().strftime('%H:%M')}] Loading store...")
     try:
-        store = load_store(store_path, verbose=verbose, ce_model_name="cross-encoder/ms-marco-MiniLM-L-6-v2")
+        store = load_store(store_path, verbose=verbose)
         print(f"[{datetime.now().strftime('%H:%M')}] Store loaded successfully")
     except Exception as e:
         print(f"[{datetime.now().strftime('%H:%M')}] Error loading store: {e}")
         return None
+
+    from sentence_transformers.cross_encoder import CrossEncoder
+    ce_model_name = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    ce_model = CrossEncoder(ce_model_name)
+    print("Cross-encoder model loaded successfully!")
     
     # Configure retrieval
     retrieval_config = RetrievalConfig(
         k=10,  # Number of results to return
-        ce_model=None,  # No cross-encoder for testing
-        diversity_type=None,  # No diversity for testing
+        ce_model=ce_model,  # No cross-encoder for testing
+        ce_model_name=ce_model_name,  # No cross-encoder model name for testing
+        diversity_type="mmr",  # No diversity for testing
         verbose=verbose
     )
     
@@ -213,7 +219,7 @@ def main():
         if not args.title or not args.content:
             args.title = "Artificial Intelligence Breakthrough in Medical Diagnosis"
             args.content = "Researchers at Stanford University have developed a new AI system that can diagnose diseases with 95% accuracy. The system uses machine learning algorithms to analyze medical images and patient data, potentially revolutionizing healthcare. The breakthrough could lead to earlier detection of cancer and other serious conditions."
-        
+        print(f"Verbose: {args.verbose}")
         result = test_rag_pipeline(
             article_title=args.title,
             article_content=args.content,

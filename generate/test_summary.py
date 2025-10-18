@@ -82,7 +82,7 @@ def top_k_similar(df, query_idx, title_col, label_col, k=4, type_filter=None):
         title_col: Column name for titles
         label_col: Column name for labels
         k: Number of similar articles to return
-        type_filter: Optional filter for specific label type ("fake" or "credible")
+        type_filter: Optional filter for specific label type ("fake" or "reliable")
     
     Returns:
         List of indices of similar articles, or dict with per-label results if type_filter is None
@@ -105,7 +105,7 @@ def top_k_similar(df, query_idx, title_col, label_col, k=4, type_filter=None):
     # normalize label function
     def norm_label(x: str) -> str:
         x = str(x).lower()
-        if x in ("1","true","credible"): return "reliable"
+        if x in ("1","true","reliable"): return "reliable"
         if x in ("0","false","fake"): return "fake"
         return x
 

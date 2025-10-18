@@ -2,9 +2,9 @@
 Full RAG pipeline for article classification.
 
 This module orchestrates the complete RAG system:
-1. Retrieves fake and credible evidence
+1. Retrieves fake and reliable evidence
 2. Generates contrastive summaries using LLMs
-3. Classifies articles as fake/credible
+3. Classifies articles as fake/reliable
 """
 
 from __future__ import annotations
@@ -17,6 +17,19 @@ import numpy as np
 import datetime as dt
 from dataclasses import dataclass
 from typing import List, Dict, Any
+
+# Import logging utilities
+import logging
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent))
+from custom_logging.logger import setup_logging, get_logger
+
+# Setup logging
+setup_logging('pipeline.log', log_level=logging.DEBUG, include_console=True)
+
+# Initialize logger
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -88,53 +101,40 @@ def classify_article_rag(
     Returns:
         RAGOutput with classification results and evidence
     """
-    if verbose:
-        print(f"[{_get_timestamp()}] [RAG Pipeline] Starting classification for: '{article_title[:50]}...'")
-        print(f"[{_get_timestamp()}] [RAG Pipeline] Using pre-loaded store")
+    logger.info(f"[RAG Pipeline] Starting classification for: '{article_title[:50]}...'")
+    logger.info("[RAG Pipeline] Using pre-loaded store")
     
     # Use default config if none provided
     if retrieval_config is None:
         retrieval_config = RetrievalConfig(
-            k=12, 
+            k=10, 
             ce_model=ce_model,
             diversity_type=diversify_type,
             verbose=verbose
         )
-        if verbose:
-            print(f"[{_get_timestamp()}] [RAG Pipeline] Using default retrieval config")
+        logger.info("[RAG Pipeline] Using default retrieval config")
     
     # Retrieve evidence for both labels
-    if verbose:
-        print(f"[{_get_timestamp()}] [RAG Pipeline] Retrieving fake evidence...")
+    logger.info("[RAG Pipeline] Retrieving fake evidence...")
     fake_hits = retrieve_evidence(
         store, 
         article_content, 
         "fake", 
-        retrieval_config.ce_model,
-        retrieval_config.diversity_type,
-        retrieval_config.k,
-        verbose
+        retrieval_config
     )
-    if verbose:
-        print(f"[{_get_timestamp()}] [RAG Pipeline] Retrieved {len(fake_hits)} fake evidence chunks")
+    logger.info(f"[RAG Pipeline] Retrieved {len(fake_hits)} fake evidence chunks")
     
-    if verbose:
-        print(f"[{_get_timestamp()}] [RAG Pipeline] Retrieving credible evidence...")
+    logger.info("[RAG Pipeline] Retrieving reliable evidence...")
     credible_hits = retrieve_evidence(
         store, 
         article_content, 
-        "credible", 
-        retrieval_config.ce_model,
-        retrieval_config.diversity_type,
-        retrieval_config.k,
-        verbose
+        "reliable", 
+        retrieval_config
     )
-    if verbose:
-        print(f"[{_get_timestamp()}] [RAG Pipeline] Retrieved {len(credible_hits)} credible evidence chunks")
+    logger.info(f"[RAG Pipeline] Retrieved {len(credible_hits)} reliable evidence chunks")
     
     # Convert hits to EvidenceChunk objects
-    if verbose:
-        print(f"[{_get_timestamp()}] [RAG Pipeline] Converting evidence to chunks...")
+    logger.info("[RAG Pipeline] Converting evidence to chunks...")
     fake_evidence = [
         EvidenceChunk(
             id=h.get("db_id", "unknown"),
@@ -154,12 +154,10 @@ def classify_article_rag(
         )
         for h in credible_hits
     ]
-    if verbose:
-        print(f"[{_get_timestamp()}] [RAG Pipeline] Converted to {len(fake_evidence)} fake and {len(credible_evidence)} credible evidence chunks")
+    logger.info(f"[RAG Pipeline] Converted to {len(fake_evidence)} fake and {len(credible_evidence)} reliable evidence chunks")
     
     # Create Article object
-    if verbose:
-        print(f"[{_get_timestamp()}] [RAG Pipeline] Creating article object...")
+    logger.info("[RAG Pipeline] Creating article object...")
     article = Article(
         id="test_article",
         title=article_title,
@@ -167,19 +165,16 @@ def classify_article_rag(
     )
     
     # Generate contrastive summaries
-    if verbose:
-        print(f"[{_get_timestamp()}] [RAG Pipeline] Generating contrastive summaries...")
+    logger.info("[RAG Pipeline] Generating contrastive summaries...")
     summaries = contrastive_summaries(
         llm, article, fake_evidence, credible_evidence
     )
     fake_summary = summaries["fake_summary"]
     reliable_summary = summaries["reliable_summary"]
-    if verbose:
-        print(f"[{_get_timestamp()}] [RAG Pipeline] Summaries generated successfully")
+    logger.info("[RAG Pipeline] Summaries generated successfully")
     
     # Classify the article
-    if verbose:
-        print(f"[{_get_timestamp()}] [RAG Pipeline] Classifying article...")
+    logger.info("[RAG Pipeline] Classifying article...")
     classification = classify_article(
         llm,
         article_title, 
@@ -187,9 +182,8 @@ def classify_article_rag(
         fake_summary, 
         reliable_summary
     )
-    if verbose:
-        print(f"[{_get_timestamp()}] [RAG Pipeline] Classification completed: {classification.prediction} (confidence: {classification.confidence:.3f})")
-        print(f"[{_get_timestamp()}] [RAG Pipeline] RAG pipeline completed successfully!")
+    logger.info(f"[RAG Pipeline] Classification completed: {classification.prediction} (confidence: {classification.confidence:.3f})")
+    logger.info("[RAG Pipeline] RAG pipeline completed successfully!")
     
     return RAGOutput(
         classification=classification,
@@ -220,7 +214,7 @@ def main():
         llm = Mistral(args.llm_url)
     
     # Load store
-    print("Loading store...")
+    logger.info("Loading store...")
     store = load_store(args.store, verbose=True)
     
     # Run RAG pipeline
@@ -232,20 +226,20 @@ def main():
     )
     
     # Print results
-    print(f"\n=== CLASSIFICATION ===")
-    print(f"Prediction: {result.classification.prediction}")
-    print(f"Confidence: {result.classification.confidence:.3f}")
-    print(f"Reasoning: {result.classification.reasoning}")
+    logger.info(f"\n=== CLASSIFICATION ===")
+    logger.info(f"Prediction: {result.classification.prediction}")
+    logger.info(f"Confidence: {result.classification.confidence:.3f}")
+    logger.info(f"Reasoning: {result.classification.reasoning}")
     
-    print(f"\n=== FAKE SUMMARY ===")
-    print(result.fake_summary)
+    logger.info(f"\n=== FAKE SUMMARY ===")
+    logger.info(result.fake_summary)
     
-    print(f"\n=== CREDIBLE SUMMARY ===")
-    print(result.reliable_summary)
+    logger.info(f"\n=== CREDIBLE SUMMARY ===")
+    logger.info(result.reliable_summary)
     
-    print(f"\n=== EVIDENCE COUNTS ===")
-    print(f"Fake evidence: {len(result.fake_evidence)} chunks")
-    print(f"Credible evidence: {len(result.reliable_evidence)} chunks")
+    logger.info(f"\n=== EVIDENCE COUNTS ===")
+    logger.info(f"Fake evidence: {len(result.fake_evidence)} chunks")
+    logger.info(f"Credible evidence: {len(result.reliable_evidence)} chunks")
 
 
 if __name__ == "__main__":

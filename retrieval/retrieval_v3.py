@@ -24,6 +24,17 @@ import sys
 sys.path.append(str(Path(__file__).parent.parent / "index"))
 from build_index_v3 import chunk_tokens, chunk_words
 
+# Import logging utilities
+import logging
+sys.path.append(str(Path(__file__).parent.parent))
+from custom_logging.logger import setup_logging, get_logger, log_system_info, log_gpu_info
+
+# Setup logging
+setup_logging('retrieval.log', log_level=logging.DEBUG, include_console=True)
+
+# Initialize logger
+logger = get_logger(__name__)
+
 
 @dataclass
 class Store:
@@ -33,7 +44,6 @@ class Store:
     v2d: Dict[int, int]  # vector_id -> db_id mapping
     original: pd.DataFrame  # Original CSV data
     json_path: str  # Path to build_index_args.json
-    ce_model: Optional[CrossEncoder] = None  # Optional cross-encoder model
 
 
 @dataclass
@@ -41,6 +51,7 @@ class RetrievalConfig:
     """Configuration for retrieval operations - compatibility class for v3 interface."""
     k: int = 10  # Number of results to return
     ce_model: Optional[CrossEncoder] = None  # Cross-encoder model for reranking
+    ce_model_name: Optional[str] = None  # Cross-encoder model name to load
     diversity_type: Optional[str] = None  # Diversity method ("mmr" or None)
     verbose: bool = False  # Verbose output
 
@@ -103,31 +114,28 @@ def get_appropriate_tokenizer(store: Store) -> callable:
         return create_words_tokenizer()
 
 
-def load_store(store_dir: str, verbose: bool = False, ce_model_name: Optional[str] = None, load_bm25: bool = False) -> Store:
+def load_store(store_dir: str, verbose: bool = True, load_bm25: bool = False) -> Store:
     """
     Load a store built with build_index_v3.py.
     
     Args:
         store_dir: Directory containing the index files
         verbose: If True, print progress information for each step
-        ce_model_name: Optional cross-encoder model name to load (e.g., "cross-encoder/ms-marco-MiniLM-L-6-v2")
+        load_bm25: If True, load BM25 index (default: False)
         
     Returns:
         Store object with loaded components
     """
-    if verbose:
-        print(f"Step 1: Checking store directory: {store_dir}")
+    logger.info(f"Step 1: Checking store directory: {store_dir}")
     
     store_path = Path(store_dir)
     if not store_path.exists():
         raise FileNotFoundError(f"Store directory not found: {store_dir}")
     
-    if verbose:
-        print(f"Store directory exists: {store_path}")
+    logger.info(f"Store directory exists: {store_path}")
     
     # Load build args to get model name
-    if verbose:
-        print("Step 2: Loading build arguments...")
+    logger.info("Step 2: Loading build arguments...")
     
     args_path = store_path / "build_index_args.json"
     if not args_path.exists():
@@ -136,22 +144,18 @@ def load_store(store_dir: str, verbose: bool = False, ce_model_name: Optional[st
     with open(args_path, 'r') as f:
         args = json.load(f)
     
-    if verbose:
-        print(f"Build arguments loaded, model: {args.get('model', 'unknown')}")
+    logger.info(f"Build arguments loaded, model: {args.get('model', 'unknown')}")
     
     # Load embedding model
-    if verbose:
-        print("Step 3: Loading embedding model...")
+    logger.info("Step 3: Loading embedding model...")
     
     model_name = args.get("model", None)
     emb = SentenceTransformer(model_name)
     
-    if verbose:
-        print(f"Embedding model loaded: {model_name}")
+    logger.info(f"Embedding model loaded: {model_name}")
     
     # Load FAISS index
-    if verbose:
-        print("Step 4: Loading FAISS index...")
+    logger.info("Step 4: Loading FAISS index...")
     
     index_path = store_path / "index.faiss"
     if not index_path.exists():
@@ -159,60 +163,52 @@ def load_store(store_dir: str, verbose: bool = False, ce_model_name: Optional[st
     
     index = faiss.read_index(str(index_path))
     
-    if verbose:
-        print(f"FAISS index loaded: {index.ntotal} vectors, dimension {index.d}")
-        
-        # Check GPU availability and move index to GPU if possible
-        try:
-            ngpu = faiss.get_num_gpus()
-            if ngpu > 0:
-                print(f"FAISS GPU support: {ngpu} GPU(s) available")
+    logger.info(f"FAISS index loaded: {index.ntotal} vectors, dimension {index.d}")
+    
+    # Check GPU availability and move index to GPU if possible
+    try:
+        ngpu = faiss.get_num_gpus()
+        if ngpu > 0:
+            logger.info(f"FAISS GPU support: {ngpu} GPU(s) available")
+            
+            # Try to move index to GPU
+            try:
+                logger.info("Attempting to move index to GPU...")
                 
-                # Try to move index to GPU
-                try:
-                    if verbose:
-                        print("Attempting to move index to GPU...")
-                    
-                    # Create GPU resources
-                    res = faiss.StandardGpuResources()
-                    
-                    # Move index to GPU
-                    gpu_index = faiss.index_cpu_to_gpu(res, 0, index)
-                    index = gpu_index
-                    
-                    if verbose:
-                        print("Index successfully moved to GPU")
-                        print(f"Index device: GPU 0")
+                # Create GPU resources
+                res = faiss.StandardGpuResources()
+                
+                # Move index to GPU
+                gpu_index = faiss.index_cpu_to_gpu(res, 0, index)
+                index = gpu_index
+                
+                logger.info("Index successfully moved to GPU")
+                logger.info(f"Index device: GPU 0")
                         
-                except Exception as gpu_error:
-                    if verbose:
-                        print(f"Could not move index to GPU: {gpu_error}")
-                        print("Continuing with CPU index...")
-                        print("Index device: CPU")
-            else:
-                print("Index device: CPU (no GPU support)")
-        except Exception as e:
-            print(f"Could not determine GPU availability: {e}")
-            print("Index device: CPU")
+            except Exception as gpu_error:
+                logger.warning(f"Could not move index to GPU: {gpu_error}")
+                logger.info("Continuing with CPU index...")
+                logger.info("Index device: CPU")
+        else:
+            logger.info("Index device: CPU (no GPU support)")
+    except Exception as e:
+        logger.warning(f"Could not determine GPU availability: {e}")
+        logger.info("Index device: CPU")
     
     # Load BM25 (optional)
-    if verbose:
-        print("Step 5: Loading BM25 index (optional)...")
+    logger.info("Step 5: Loading BM25 index (optional)...")
     
     bm25_path = store_path / "bm25.pkl"
     bm25 = None
     if load_bm25 and bm25_path.exists():
         with open(bm25_path, "rb") as f:
             bm25 = pickle.load(f)
-        if verbose:
-            print("BM25 index loaded")
+        logger.info("BM25 index loaded")
     else:
-        if verbose:
-            print("BM25 index not found, skipping")
+        logger.info("BM25 index not found, skipping")
     
     # Load metadata.csv and create v2d mapping
-    if verbose:
-        print("Step 6: Loading metadata and creating v2d mapping...")
+    logger.info("Step 6: Loading metadata and creating v2d mapping...")
     
     metadata_path = store_path / "metadata.csv"
     if not metadata_path.exists():
@@ -221,12 +217,10 @@ def load_store(store_dir: str, verbose: bool = False, ce_model_name: Optional[st
     df_meta = pd.read_csv(metadata_path)  # TODO replace v2d with search function
     v2d = {int(row["vector_id"]): int(row["db_id"]) for _, row in df_meta.iterrows()}
     
-    if verbose:
-        print(f"Metadata loaded: {len(v2d)} vector_id -> db_id mappings")
+    logger.info(f"Metadata loaded: {len(v2d)} vector_id -> db_id mappings")
     
     # Load original CSV data
-    if verbose:
-        print("Step 7: Loading original CSV data...")
+    logger.info("Step 7: Loading original CSV data...")
     
     original_path = Path("/StudentData/preprocessed/train.csv")
     if not original_path.exists():
@@ -234,29 +228,14 @@ def load_store(store_dir: str, verbose: bool = False, ce_model_name: Optional[st
     
     original = pd.read_csv(original_path)
     
-    if verbose:
-        print(f"Original CSV loaded: {original.shape[0]} rows, {original.shape[1]} columns")
+    logger.info(f"Original CSV loaded: {original.shape[0]} rows, {original.shape[1]} columns")
     
-    # Load cross-encoder model (optional)
-    if verbose:
-        print("Step 8: Loading cross-encoder model (optional)...")
+    # Skip cross-encoder model loading (will be loaded separately when needed)
+    logger.info("Step 8: Skipping cross-encoder model loading (will be loaded separately when needed)")
     
     ce_model = None
-    if ce_model_name:
-        try:
-            ce_model = CrossEncoder(ce_model_name)
-            if verbose:
-                print(f"Cross-encoder model loaded: {ce_model_name}")
-        except Exception as e:
-            if verbose:
-                print(f"Failed to load cross-encoder model {ce_model_name}: {e}")
-            ce_model = None
-    else:
-        if verbose:
-            print("No cross-encoder model specified, skipping")
     
-    if verbose:
-        print("Step 9: Creating Store object...")
+    logger.info("Step 9: Creating Store object...")
     
     store = Store(
         emb=emb,
@@ -264,12 +243,10 @@ def load_store(store_dir: str, verbose: bool = False, ce_model_name: Optional[st
         bm25=bm25,
         v2d=v2d,
         original=original,
-        json_path=str(args_path),
-        ce_model=ce_model
+        json_path=str(args_path)
     )
     
-    if verbose:
-        print("Store object created successfully!")
+    logger.info("Store object created successfully!")
     
     return store
 
@@ -356,10 +333,8 @@ def filter_label(results: List[Dict[str, Any]], label: str) -> List[Dict[str, An
 def retrieve_evidence(store: Store,
                       article_text: str,
                       label_name: str,
-                      diversity_type,
-                      k: int = 10,
-                      minimum_k: int = 100,
-                      verbose: bool = False) -> List[Dict[str, Any]]:
+                      retrieval_config: RetrievalConfig,
+                      minimum_k: int = 100) -> List[Dict[str, Any]]:
     """
     Retrieve evidence for an article with optional cross-encoder reranking and diversity.
     
@@ -367,105 +342,100 @@ def retrieve_evidence(store: Store,
         store: Store object containing index, model, and metadata
         article_text: Article text to find evidence for
         label_name: Label to filter by (e.g., "real", "fake")
-        diversity_type: Diversity method ("mmr" or None to skip)
-        k: Number of final results to return
-        verbose: If True, print progress information
+        retrieval_config: RetrievalConfig object containing k, ce_model, diversity_type, and verbose settings
+        minimum_k: Minimum number of results to retrieve before filtering
         
     Returns:
         List of evidence results with optional reranking and diversification
     """
-    if verbose:
-        print(f"Starting evidence retrieval for label: {label_name}")
-        print(f"Article text: {article_text[:100]}...")
+    logger.info(f"Starting evidence retrieval for label: {label_name}")
+    logger.info(f"Article text: {article_text[:100]}...")
     
     # Step 1: Perform initial query
-    if verbose:
-        print("Step 1: Performing initial query...")
+    logger.info("Step 1: Performing initial query...")
     
     # Use a larger k for initial retrieval to account for filtering and diversification
-    initial_k = max(k * 3, minimum_k)  # Retrieve 3x more than needed, minimum minimum_k
+    initial_k = max(retrieval_config.k * 3, minimum_k)  # Retrieve 3x more than needed, minimum minimum_k
     results = query_once(store, article_text, k=initial_k)
     
-    if verbose:
-        print(f"Retrieved {len(results)} initial results")
+    logger.info(f"Retrieved {len(results)} initial results")
     
     # Step 2: Deduplicate results
-    if verbose:
-        print("Step 2: Deduplicating results...")
+    logger.info("Step 2: Deduplicating results...")
     
     results = deduplicate(results)
     
-    if verbose:
-        print(f"After deduplication: {len(results)} results")
+    logger.info(f"After deduplication: {len(results)} results")
     
     # Step 3: Filter by label
-    if verbose:
-        print(f"Step 3: Filtering by label '{label_name}'...")
+    logger.info(f"Step 3: Filtering by label '{label_name}'...")
     
     results = filter_label(results, label_name)
     
-    if verbose:
-        print(f"After label filtering: {len(results)} results")
+    logger.info(f"After label filtering: {len(results)} results")
     
     if not results:
-        if verbose:
-            print("No results found after filtering, returning empty list")
+        logger.info("No results found after filtering, returning empty list")
         return []
 
-    ce_model = store.ce_model
+    ce_model = retrieval_config.ce_model
+    
+    # Load cross-encoder model if ce_model_name is provided but ce_model is None
+    if ce_model is None and retrieval_config.ce_model_name is not None:
+        logger.info(f"Loading cross-encoder model: {retrieval_config.ce_model_name}")
+        try:
+            from sentence_transformers.cross_encoder import CrossEncoder
+            ce_model = CrossEncoder(retrieval_config.ce_model_name)
+            logger.info("Cross-encoder model loaded successfully")
+        except Exception as e:
+            logger.warning(f"Failed to load cross-encoder model: {e}")
+            ce_model = None
     
     # Step 4: Cross-encoder reranking (if model provided)
     if ce_model is not None:
-        if verbose:
-            print("Step 4: Applying cross-encoder reranking...")
+        logger.info("Step 4: Applying cross-encoder reranking...")
         
         try:
             results = cross_encoder_rerank(
                 cross_enc=ce_model,
                 query_text=article_text,
                 results=results,
-                ce_topk=min(len(results), k * 2),  # Rerank up to 2x final k
+                ce_topk=min(len(results), retrieval_config.k * 2),  # Rerank up to 2x final k
                 ce_weight=1.0,
                 batch_size=8
             )
             
-            if verbose:
-                print(f"After cross-encoder reranking: {len(results)} results")
+            logger.info(f"After cross-encoder reranking: {len(results)} results")
                 
         except Exception as e:
-            if verbose:
-                print(f"Cross-encoder reranking failed: {e}")
+            logger.warning(f"Cross-encoder reranking failed: {e}")
             # Continue without reranking if it fails
     
     # Step 5: Diversity (if requested)
-    if diversity_type is not None and diversity_type.lower() == "mmr":
-        if verbose:
-            print("Step 5: Applying MMR diversification...")
+    if retrieval_config.diversity_type is not None and retrieval_config.diversity_type.lower() == "mmr":
+        logger.info("Step 5: Applying MMR diversification...")
         
         try:
             results = mmr_diversify(
                 store=store,
                 query_text=article_text,
                 results=results,
-                top_k=k,
+                top_k=retrieval_config.k,
                 lambda_mmr=0.5,
                 content_key="content"
             )
             
-            if verbose:
-                print(f"After MMR diversification: {len(results)} results")
+            logger.info(f"After MMR diversification: {len(results)} results")
                 
         except Exception as e:
-            if verbose:
-                print(f"MMR diversification failed: {e}")
+            logger.warning(f"MMR diversification failed: {e}")
             # Continue without diversification if it fails
     
     # Step 6: Return top k results
-    final_results = results[:k]
+    final_results = results[:retrieval_config.k]
     
-    if verbose:
-        print(f"Final results: {len(final_results)} evidence items")
-        print("Evidence retrieval completed successfully!")
+    logger.info(f"Final results: {len(final_results)} evidence items")
+    logger.info("Evidence retrieval completed successfully!")
     
     return final_results
 

@@ -28,9 +28,7 @@ def test_retrieve_evidence_basic(store, verbose: bool = True):
             store=store,
             article_text=article_text,
             label_name="reliable",
-            ce_model=None,
             diversity_type=None,
-            k=5,
             verbose=verbose
         )
         
@@ -45,9 +43,7 @@ def test_retrieve_evidence_basic(store, verbose: bool = True):
             store=store,
             article_text=article_text,
             label_name="reliable",
-            ce_model=None,
             diversity_type="mmr",
-            k=3,
             verbose=verbose
         )
         
@@ -62,9 +58,7 @@ def test_retrieve_evidence_basic(store, verbose: bool = True):
             store=store,
             article_text=article_text,
             label_name="fake",
-            ce_model=None,
             diversity_type=None,
-            k=3,
             verbose=verbose
         )
         
@@ -72,11 +66,6 @@ def test_retrieve_evidence_basic(store, verbose: bool = True):
         for i, result in enumerate(results_fake, 1):
             print(f"  [{i}] db_id: {result['db_id']}, score: {result['score']:.4f}, label: {result['label']}")
             print(f"      content: {result['content'][:80]}...")
-        
-        # Test 4: Show label distribution info
-        print(f"\n--- Label Distribution Info ---")
-        print(f"Dataset has ~98% fake and ~2% reliable labels")
-        print(f"This explains why we get more fake results than reliable ones")
         
         return True
         
@@ -108,9 +97,7 @@ def test_retrieve_evidence_with_cross_encoder(store, verbose: bool = True):
             store=store,
             article_text=article_text,
             label_name="reliable",
-            ce_model=ce_model,
             diversity_type=None,
-            k=3,
             verbose=verbose
         )
         
@@ -142,9 +129,7 @@ def test_retrieve_evidence_edge_cases(store, verbose: bool = False):
             store=store,
             article_text="",
             label_name="reliable",
-            ce_model=None,
             diversity_type=None,
-            k=5,
             verbose=verbose
         )
         print(f"Empty article text test: {len(results)} results")
@@ -158,9 +143,7 @@ def test_retrieve_evidence_edge_cases(store, verbose: bool = False):
             store=store,
             article_text="test article",
             label_name="nonexistent",
-            ce_model=None,
             diversity_type=None,
-            k=5,
             verbose=verbose
         )
         print(f"Non-existent label test: {len(results)} results")
@@ -174,9 +157,7 @@ def test_retrieve_evidence_edge_cases(store, verbose: bool = False):
             store=store,
             article_text="AI",
             label_name="reliable",
-            ce_model=None,
             diversity_type=None,
-            k=5,
             verbose=verbose
         )
         print(f"Short article test: {len(results)} results")
@@ -191,7 +172,7 @@ def main():
     parser = argparse.ArgumentParser(description="Test retrieve_evidence function")
     parser.add_argument("--edge-cases", action="store_true", help="Run edge case tests only")
     parser.add_argument("--cross-encoder", action="store_true", help="Test with cross-encoder reranking")
-    parser.add_argument("--store-dir", type=str, default="/StudentData/slice", help="Store directory path")
+    parser.add_argument("--store-dir", type=str, default="/StudentData/index", help="Store directory path")
     parser.add_argument("--quiet", action="store_true", help="Run in quiet mode (less verbose)")
     
     args = parser.parse_args()
@@ -202,7 +183,7 @@ def main():
     try:
         # Load store
         print("Loading store...")
-        store = load_store(args.store_dir, verbose=not args.quiet)
+        store = load_store(args.store_dir, verbose=not args.quiet, ce_model_name="cross-encoder/ms-marco-MiniLM-L-6-v2")
         print(f"Store loaded successfully with {store.index.ntotal} vectors")
         
         verbose = True

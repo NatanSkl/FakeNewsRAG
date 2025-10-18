@@ -71,7 +71,7 @@ def test_rag_pipeline(
     # Load store
     print(f"[{datetime.now().strftime('%H:%M')}] Loading store...")
     try:
-        store = load_store(store_path, verbose=verbose)
+        store = load_store(store_path, verbose=verbose, ce_model_name="cross-encoder/ms-marco-MiniLM-L-6-v2")
         print(f"[{datetime.now().strftime('%H:%M')}] Store loaded successfully")
     except Exception as e:
         print(f"[{datetime.now().strftime('%H:%M')}] Error loading store: {e}")
@@ -179,7 +179,7 @@ def test_multiple_articles():
         result = test_rag_pipeline(
             article_title=article["title"],
             article_content=article["content"],
-            store_path="/StudentData/slice",
+            store_path="/StudentData/index",
             llm_url="http://127.0.0.1:8010",
             llm_type="llama",
             verbose=True

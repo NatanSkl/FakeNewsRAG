@@ -103,7 +103,7 @@ def get_appropriate_tokenizer(store: Store) -> callable:
         return create_words_tokenizer()
 
 
-def load_store(store_dir: str, verbose: bool = False, ce_model_name: Optional[str] = None) -> Store:
+def load_store(store_dir: str, verbose: bool = False, ce_model_name: Optional[str] = None, load_bm25: bool = False) -> Store:
     """
     Load a store built with build_index_v3.py.
     
@@ -161,6 +161,39 @@ def load_store(store_dir: str, verbose: bool = False, ce_model_name: Optional[st
     
     if verbose:
         print(f"FAISS index loaded: {index.ntotal} vectors, dimension {index.d}")
+        
+        # Check GPU availability and move index to GPU if possible
+        try:
+            ngpu = faiss.get_num_gpus()
+            if ngpu > 0:
+                print(f"FAISS GPU support: {ngpu} GPU(s) available")
+                
+                # Try to move index to GPU
+                try:
+                    if verbose:
+                        print("Attempting to move index to GPU...")
+                    
+                    # Create GPU resources
+                    res = faiss.StandardGpuResources()
+                    
+                    # Move index to GPU
+                    gpu_index = faiss.index_cpu_to_gpu(res, 0, index)
+                    index = gpu_index
+                    
+                    if verbose:
+                        print("Index successfully moved to GPU")
+                        print(f"Index device: GPU 0")
+                        
+                except Exception as gpu_error:
+                    if verbose:
+                        print(f"Could not move index to GPU: {gpu_error}")
+                        print("Continuing with CPU index...")
+                        print("Index device: CPU")
+            else:
+                print("Index device: CPU (no GPU support)")
+        except Exception as e:
+            print(f"Could not determine GPU availability: {e}")
+            print("Index device: CPU")
     
     # Load BM25 (optional)
     if verbose:
@@ -168,7 +201,7 @@ def load_store(store_dir: str, verbose: bool = False, ce_model_name: Optional[st
     
     bm25_path = store_path / "bm25.pkl"
     bm25 = None
-    if bm25_path.exists():
+    if load_bm25 and bm25_path.exists():
         with open(bm25_path, "rb") as f:
             bm25 = pickle.load(f)
         if verbose:
@@ -258,10 +291,6 @@ def embed_and_normalize(texts, model):
     return X.astype(np.float32)
 
 
-# TODO create retrieve_evidence
-# TODO create filter function
-
-
 def deduplicate(results: List[Dict[str, Any]], score_key: str = "score") -> List[Dict[str, Any]]:
     """
     Remove duplicate db_id entries from results, keeping only the one with the highest score.
@@ -327,9 +356,9 @@ def filter_label(results: List[Dict[str, Any]], label: str) -> List[Dict[str, An
 def retrieve_evidence(store: Store,
                       article_text: str,
                       label_name: str,
-                      ce_model,
                       diversity_type,
-                      k: int,
+                      k: int = 10,
+                      minimum_k: int = 100,
                       verbose: bool = False) -> List[Dict[str, Any]]:
     """
     Retrieve evidence for an article with optional cross-encoder reranking and diversity.
@@ -338,7 +367,6 @@ def retrieve_evidence(store: Store,
         store: Store object containing index, model, and metadata
         article_text: Article text to find evidence for
         label_name: Label to filter by (e.g., "real", "fake")
-        ce_model: Cross-encoder model for reranking (None to skip)
         diversity_type: Diversity method ("mmr" or None to skip)
         k: Number of final results to return
         verbose: If True, print progress information
@@ -355,7 +383,7 @@ def retrieve_evidence(store: Store,
         print("Step 1: Performing initial query...")
     
     # Use a larger k for initial retrieval to account for filtering and diversification
-    initial_k = max(k * 3, 50)  # Retrieve 3x more than needed, minimum 50
+    initial_k = max(k * 3, minimum_k)  # Retrieve 3x more than needed, minimum minimum_k
     results = query_once(store, article_text, k=initial_k)
     
     if verbose:
@@ -383,6 +411,8 @@ def retrieve_evidence(store: Store,
         if verbose:
             print("No results found after filtering, returning empty list")
         return []
+
+    ce_model = store.ce_model
     
     # Step 4: Cross-encoder reranking (if model provided)
     if ce_model is not None:

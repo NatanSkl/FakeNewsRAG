@@ -19,7 +19,7 @@ curl http://127.0.0.1:8010/v1/chat/completions \
         "model": "local",
         "messages": [
           {"role":"system","content":"You are helpful."},
-          {"role":"user","content":"Say bananas! in one short sentence."}
+          {"role":"user","content":"Tell me a joke about bananas."}
         ],
         "max_tokens": 64,
         "temperature": 0.2

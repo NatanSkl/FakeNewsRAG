@@ -10,7 +10,6 @@ import re
 
 
 CHUNK_SIZE = 100000
-BALANCED_SIZE = 3e5
 SEED = 404
 VALID_LABELS = ["fake", "reliable"]  # TODO: adapt for multiple labels
 csv.field_size_limit(sys.maxsize)
@@ -23,6 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out-dir", default="data")
     parser.add_argument("--test-split", type=float, default=0.05)
     parser.add_argument("--val-split", type=float, default=0.05)
+    parser.add_argument("--balanced-size", type=int, default=3e5)
     parser.add_argument("--skip-preprocessing", action="store_true")
     parser.add_argument("--skip-balancing", action="store_true")
 
@@ -134,7 +134,7 @@ def main():
     if not args.skip_preprocessing:
         preprocess(args.input, filepath)
     if not args.skip_balancing:
-        balanced_sample(filepath, filepath_2, BALANCED_SIZE)
+        balanced_sample(filepath, filepath_2, args.balanced_size)
     split(filepath_2, args.out_dir, args.test_split, args.val_split)
 
 

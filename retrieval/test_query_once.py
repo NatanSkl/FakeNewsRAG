@@ -16,7 +16,7 @@ from sentence_transformers import SentenceTransformer
 from retrieval_v3 import query_once, embed_and_normalize, load_store
 
 
-def load_real_store(store_dir="/StudentData/slice"):
+def load_real_store(store_dir="/StudentData/index"):
     """Load the real store from the specified directory."""
     print(f"Loading real store from {store_dir}...")
     
@@ -40,7 +40,7 @@ def test_query_once_basic():
     print("="*60)
     
     # Load real store
-    store = load_real_store("/StudentData/slice")
+    store = load_real_store("/StudentData/index")
     
     # Test queries
     test_queries = [

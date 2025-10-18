@@ -1,5 +1,6 @@
 import os
 import time
+import logging
 import faiss
 import torch
 import pickle
@@ -13,6 +14,31 @@ from sentence_transformers import SentenceTransformer
 
 
 COLUMNS = ["id", "label", "title", "content"]
+
+
+def setup_logging() -> None:
+    """Configure logging to output to output.log with timestamps and appropriate levels."""
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler('output.log'),
+            logging.StreamHandler()  # Also output to console
+        ]
+    )
+    logging.info("Logging initialized - output will be written to output.log")
+
+
+def log_system_info() -> None:
+    """Log system information for debugging purposes."""
+    try:
+        # GPU information
+        if torch.cuda.is_available():
+            gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            logging.debug(f"GPU memory: {gpu_memory:.1f} GB")
+        
+    except Exception as e:
+        logging.warning(f"Could not retrieve system information: {e}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -76,8 +102,8 @@ def parse_args() -> argparse.Namespace:
 def embed_batches(
     texts: List[str], model: SentenceTransformer, batch_size: int, normalize: bool
 ) -> np.ndarray:
-    print(
-        f"[DEBUG] embed_batches called with {len(texts)} texts, batch_size={batch_size}"
+    logging.debug(
+        f"embed_batches called with {len(texts)} texts, batch_size={batch_size}"
     )
     vectors_list: List[np.ndarray] = []
     encode_times = []
@@ -86,8 +112,8 @@ def embed_batches(
         batch = texts[i : i + batch_size]
         if not batch:
             continue
-        print(f"[DEBUG] Processing batch {i//batch_size + 1} with {len(batch)} texts")
-        print(f"[DEBUG] About to call model.encode()")
+        logging.debug(f"Processing batch {i//batch_size + 1} with {len(batch)} texts")
+        logging.debug("About to call model.encode()")
 
         # Time the model.encode() call
         start_time = time.time()
@@ -103,28 +129,29 @@ def embed_batches(
         encode_time = end_time - start_time
         encode_times.append(encode_time)
 
-        print(
-            f"[DEBUG] model.encode() completed in {encode_time:.3f}s, shape: {vectors.shape}"
+        logging.debug(
+            f"model.encode() completed in {encode_time:.3f}s, shape: {vectors.shape}"
         )
         vectors_list.append(vectors)
 
     if not vectors_list:
-        print("[DEBUG] No vectors generated, returning empty array")
+        logging.debug("No vectors generated, returning empty array")
         return np.zeros((0, 0), dtype=np.float32)
 
     # Calculate and report timing statistics
     if encode_times:
         avg_time = sum(encode_times) / len(encode_times)
         total_time = sum(encode_times)
-        print(f"[TIMING] Model.encode() statistics:")
-        print(f"[TIMING]   - Total batches: {len(encode_times)}")
-        print(f"[TIMING]   - Average time per batch: {avg_time:.3f}s")
-        print(f"[TIMING]   - Total encoding time: {total_time:.3f}s")
-        print(f"[TIMING]   - Min time: {min(encode_times):.3f}s")
-        print(f"[TIMING]   - Max time: {max(encode_times):.3f}s")
+        logging.info(f"Model.encode() statistics:")
+        logging.info(f"  - Total batches: {len(encode_times)}")
+        logging.info(f"  - Average time per batch: {avg_time:.3f}s")
+        logging.info(f"  - Total encoding time: {total_time:.3f}s")
+        logging.info(f"  - Min time: {min(encode_times):.3f}s")
+        logging.info(f"  - Max time: {max(encode_times):.3f}s")
 
     result = np.vstack(vectors_list)
-    print(f"[DEBUG] Final embeddings shape: {result.shape}")
+    logging.debug(f"Final embeddings shape: {result.shape}")
+    
     return result
 
 
@@ -154,7 +181,7 @@ def make_index(dim: int, args: argparse.Namespace) -> faiss.Index:
     if args.index_type.startswith("Flat"):
         # Move to GPU if available
         if ngpu > 0:
-            print("[INFO] Moving index to GPU")
+            logging.info("Moving index to GPU")
             res = faiss.StandardGpuResources()
             return faiss.index_cpu_to_gpu(res, 0, flat)
         return flat
@@ -170,7 +197,7 @@ def make_index(dim: int, args: argparse.Namespace) -> faiss.Index:
 
         # Move to GPU if available
         if ngpu > 0:
-            print("[INFO] Moving index to GPU")
+            logging.info("Moving index to GPU")
             if ngpu == 1:
                 res = faiss.StandardGpuResources()
                 return faiss.index_cpu_to_gpu(res, 0, cpu_index)
@@ -182,47 +209,47 @@ def make_index(dim: int, args: argparse.Namespace) -> faiss.Index:
 
 
 def infer_dim(args: argparse.Namespace, model: SentenceTransformer) -> int:
-    print("[DEBUG] infer_dim function started")
+    logging.debug("infer_dim function started")
     for df in utils.load_dataframe_chunks(
         args.input, limit=args.limit, chunksize=args.chunk_size
     ):
-        print(f"[DEBUG] Processing chunk for dimension inference with {len(df)} rows")
+        logging.debug(f"Processing chunk for dimension inference with {len(df)} rows")
         utils.validate_columns(df.columns, COLUMNS)
         texts = (df["title"].astype(str) + "\n" + df["content"].astype(str)).tolist()
         if not texts:
-            print("[DEBUG] No texts in chunk for dimension inference, skipping")
+            logging.debug("No texts in chunk for dimension inference, skipping")
             continue
         batch = texts[: min(len(texts), args.batch_size)]
-        print(
-            f"[DEBUG] About to embed batch of {len(batch)} texts for dimension inference"
+        logging.debug(
+            f"About to embed batch of {len(batch)} texts for dimension inference"
         )
         batch_embeddings = embed_batches(batch, model, args.batch_size, args.normalize)
         if batch_embeddings.size > 0:
             dim = int(batch_embeddings.shape[1])
-            print(f"[DEBUG] Successfully inferred dimension: {dim}")
+            logging.debug(f"Successfully inferred dimension: {dim}")
             return dim
-    raise RuntimeError("[ERROR] Failed to infer embedding dimensions.")
+    raise RuntimeError("Failed to infer embedding dimensions.")
 
 
 def build_index(
     args: argparse.Namespace, model: SentenceTransformer
 ) -> Tuple[faiss.Index, int]:
-    print("[DEBUG] build_index function started")
+    logging.debug("build_index function started")
 
     # Check GPU availability
     ngpu = faiss.get_num_gpus()
     if ngpu > 0:
-        print(f"[INFO] FAISS GPU support detected: {ngpu} GPU(s) available")
+        logging.info(f"FAISS GPU support detected: {ngpu} GPU(s) available")
     else:
-        print("[INFO] FAISS GPU support not available, using CPU")
+        logging.info("FAISS GPU support not available, using CPU")
 
-    print("[DEBUG] About to call infer_dim")
+    logging.debug("About to call infer_dim")
     dim = infer_dim(args, model)
-    print(f"[DEBUG] infer_dim completed, dimension: {dim}")
+    logging.debug(f"infer_dim completed, dimension: {dim}")
 
-    print("[DEBUG] About to call make_index")
+    logging.debug("About to call make_index")
     pre_index = make_index(dim, args)
-    print("[DEBUG] make_index completed successfully")
+    logging.debug("make_index completed successfully")
 
     # Determine if we have an IVF-based index that needs training
     needs_training = False
@@ -234,61 +261,61 @@ def build_index(
 
     # IVF / IVFPQ training (automatically happens on GPU if index is on GPU)
     if needs_training:
-        print("[DEBUG] Index is IVF type, starting training sample collection")
+        logging.debug("Index is IVF type, starting training sample collection")
         # Collect training sample
         sample_vectors: List[np.ndarray] = []
         total_sampled = 0
 
-        print("[DEBUG] About to start loading dataframe chunks for training")
+        logging.debug("About to start loading dataframe chunks for training")
         for df in utils.load_dataframe_chunks(
             args.input, limit=args.limit, chunksize=args.chunk_size
         ):
-            print(f"[DEBUG] Processing training chunk with {len(df)} rows")
+            logging.debug(f"Processing training chunk with {len(df)} rows")
             texts = (
                 df["title"].astype(str) + "\n" + df["content"].astype(str)
             ).tolist()
             if not texts:
-                print("[DEBUG] No texts in training chunk, skipping")
+                logging.debug("No texts in training chunk, skipping")
                 continue
 
             # Calc sample fraction
             frac = min(1.0, max(0.01, args.train_sample / max(len(texts), 1)))
             if 0 < frac < 1.0:
-                print(f"[DEBUG] Sampling {frac:.2%} of {len(texts)} texts for training")
+                logging.debug(f"Sampling {frac:.2%} of {len(texts)} texts for training")
                 samp = df.sample(frac=frac, random_state=1332)
                 texts = (
                     samp["title"].astype(str) + "\n" + samp["content"].astype(str)
                 ).tolist()
-            print(f"[DEBUG] About to embed {len(texts)} texts for training")
+            logging.debug(f"About to embed {len(texts)} texts for training")
             batch_embeddings = embed_batches(
                 texts, model, args.batch_size, args.normalize
             )
             if batch_embeddings.size == 0:
-                print("[DEBUG] No embeddings generated for training, skipping")
+                logging.debug("No embeddings generated for training, skipping")
                 continue
             sample_vectors.append(batch_embeddings)
             total_sampled += batch_embeddings.shape[0]
-            print(f"[DEBUG] Total sampled for training so far: {total_sampled}")
+            logging.debug(f"Total sampled for training so far: {total_sampled}")
             if total_sampled >= args.train_sample:
-                print("[DEBUG] Reached training sample limit, breaking")
+                logging.debug("Reached training sample limit, breaking")
                 break
 
         if not sample_vectors:
             raise RuntimeError(
-                "[ERROR] Failed to sample vectors for IVF / IVFPQ training."
+                "Failed to sample vectors for IVF / IVFPQ training."
             )
 
-        print(f"[DEBUG] Training matrix shape: {len(sample_vectors)} vectors")
+        logging.debug(f"Training matrix shape: {len(sample_vectors)} vectors")
         train_matrix = np.vstack(sample_vectors).astype(np.float32)
-        print(f"[DEBUG] About to train index with matrix shape: {train_matrix.shape}")
+        logging.debug(f"About to train index with matrix shape: {train_matrix.shape}")
 
         # Train (automatically on GPU if index is on GPU)
         pre_index.train(train_matrix)
         training_location = "GPU" if ngpu > 0 else "CPU"
-        print(f"[INFO] Index training completed on {training_location}")
+        logging.info(f"Index training completed on {training_location}")
 
     # wrap pre_index with IDMap
-    print("[DEBUG] Wrapping index with IDMap")
+    logging.debug("Wrapping index with IDMap")
     index = faiss.IndexIDMap2(pre_index)
 
     # Set nprobe for IVF indices
@@ -299,9 +326,9 @@ def build_index(
             pre_index.index, faiss.IndexIVF
         ):
             pre_index.index.nprobe = args.nprobe
-        print(f"[DEBUG] Set nprobe={args.nprobe}")
+        logging.debug(f"Set nprobe={args.nprobe}")
 
-    print("[DEBUG] build_index function completed successfully")
+    logging.debug("build_index function completed successfully")
     return index, dim
 
 
@@ -361,7 +388,7 @@ def add_vectors_streaming(
     encoder: tiktoken.Encoding,
     metadata_sink: utils.MetadataSink,
 ) -> None:
-    print("[DEBUG] add_vectors_streaming function started")
+    logging.debug("add_vectors_streaming function started")
     added = 0
     counter = [0]
     out_path = os.path.join(args.out_dir, "index.faiss")
@@ -369,18 +396,20 @@ def add_vectors_streaming(
     bm25_corpus: List[List[str]] = []
     bm25_ids: List[int] = []
 
-    print("[DEBUG] About to start processing dataframe chunks")
+    logging.debug("About to start processing dataframe chunks")
+    chunk_count = 0
     for df in utils.load_dataframe_chunks(
         args.input, limit=args.limit, chunksize=args.chunk_size
     ):
-        print(f"[DEBUG] Processing chunk with {len(df)} rows")
+        chunk_count += 1
+        logging.debug(f"Processing chunk {chunk_count} with {len(df)} rows")
         utils.validate_columns(df.columns, COLUMNS)
         df = df[COLUMNS].dropna()
 
         texts_list = (
             df["title"].astype(str) + "\n" + df["content"].astype(str)
         ).tolist()
-        print(f"[DEBUG] Generated {len(texts_list)} texts from chunk")
+        logging.debug(f"Generated {len(texts_list)} texts from chunk")
         vid_to_dbid = {}
 
         # row-by-row chunking
@@ -424,60 +453,71 @@ def add_vectors_streaming(
                     bm25_ids.append(v_id)
 
         if not texts:
-            print("[DEBUG] No texts in chunk, skipping")
+            logging.debug("No texts in chunk, skipping")
             continue
 
-        print(f"[DEBUG] About to embed {len(texts)} texts")
+        logging.debug(f"About to embed {len(texts)} texts")
         batch_embeddings = embed_batches(texts, model, args.batch_size, args.normalize)
-        print(f"[DEBUG] Embeddings generated, shape: {batch_embeddings.shape}")
+        logging.debug(f"Embeddings generated, shape: {batch_embeddings.shape}")
         ids_array = np.array(v_ids, dtype=int)
-        print(f"[DEBUG] About to add {len(ids_array)} vectors to index")
+        logging.debug(f"About to add {len(ids_array)} vectors to index")
         index.add_with_ids(batch_embeddings, ids_array)
         added += len(ids_array)
-        print(f"[DEBUG] Added {len(ids_array)} vectors, total: {added}")
+        logging.debug(f"Added {len(ids_array)} vectors, total: {added}")
+        
         metadata_sink.write(vid_to_dbid)
         if added % args.checkpoint_every < len(ids_array):
-            print(f"[DEBUG] Checkpointing at {added} vectors")
+            logging.debug(f"Checkpointing at {added} vectors")
             faiss.write_index(index, out_path)
-            print(f"[INFO] Checkpointed at {added} vectors")
+            logging.info(f"Checkpointed at {added} vectors")
 
     faiss.write_index(index, out_path)
-    print(f"[INFO] Done adding vectors. Total added: {added}")
-    print(f"[INFO] Training BM25 on {len(bm25_corpus)} documents]")
+    logging.info(f"Done adding vectors. Total added: {added}")
+    logging.info(f"Training BM25 on {len(bm25_corpus)} documents")
     bm25 = BM25Okapi(bm25_corpus)  # ,tokenizer=encoder)
     bm25.doc_ids = bm25_ids
     bm25_path = os.path.join(args.out_dir, args.bm25_out)
     with open(bm25_path, "wb") as bm25_file:
         pickle.dump(bm25, bm25_file)
-    print(f"[INFO] Done saving BM25 vectors to {bm25_path}]")
+    logging.info(f"Done saving BM25 vectors to {bm25_path}")
 
 
 def main() -> None:
+    # Setup logging first
+    setup_logging()
+    
+    # Log start time
+    start_time = time.time()
+    logging.info(f"=== INDEX BUILDING STARTED at {time.strftime('%Y-%m-%d %H:%M:%S')} ===")
+    
+    # Log system information
+    log_system_info()
+    
     args = parse_args()
     index_path = os.path.join(args.out_dir, "index.faiss")
 
     # Use GPU if available (Tesla M60 should work with PyTorch 1.11.0)
     if torch.cuda.is_available():
         device = "cuda"
-        print(f"[DEBUG] Using GPU: {torch.cuda.get_device_name(0)}")
+        logging.debug(f"Using GPU: {torch.cuda.get_device_name(0)}")
     elif torch.backends.mps.is_available():
         device = "mps"
-        print("[DEBUG] Using MPS (Apple Silicon) - FAISS will use CPU")
+        logging.debug("Using MPS (Apple Silicon) - FAISS will use CPU")
     else:
         device = "cpu"
 
     # Initialize tokenizer and model
     encoder = tiktoken.get_encoding(args.encoding)
     model = SentenceTransformer(args.model, device=device)
-    print(
-        f"[INFO] Model loaded: {args.model} | Device: {device} | Encoding: {args.encoding if args.use_encoding else 'words'}"
+    logging.info(
+        f"Model loaded: {args.model} | Device: {device} | Encoding: {args.encoding if args.use_encoding else 'words'}"
     )
-    print("[DEBUG] Model loading completed successfully")
+    logging.debug("Model loading completed successfully")
 
     # If set to append, load the existing index. If now, train a new one.
-    print("[DEBUG] Checking if index exists and append mode")
+    logging.debug("Checking if index exists and append mode")
     if args.append and os.path.exists(index_path):
-        print("[DEBUG] Loading existing index")
+        logging.debug("Loading existing index")
         index = faiss.read_index(index_path)
         try:
             # set correct index nprobe if necessary
@@ -490,29 +530,35 @@ def main() -> None:
         except Exception:
             pass
         dim = index.d
-        print(f"[INFO] Index loaded: {index_path}")
-        print(f"[DEBUG] Index dimension: {dim}")
+        logging.info(f"Index loaded: {index_path}")
+        logging.debug(f"Index dimension: {dim}")
 
     else:
-        print("[DEBUG] Building new index - calling build_index function")
+        logging.debug("Building new index - calling build_index function")
         index, dim = build_index(args, model)
-        print(f"[INFO] Index built: {index_path}")
-        print(f"[DEBUG] Index dimension: {dim}")
+        logging.info(f"Index built: {index_path}")
+        logging.debug(f"Index dimension: {dim}")
 
     # Open metadata sink
-    print("[DEBUG] Opening metadata sink")
+    logging.debug("Opening metadata sink")
     metadata_sink = utils.get_metadata_sink(
         args.out_dir, args.save_metadata_as, append=args.append
     )
-    print(f"[INFO] Metadata sink opened: {metadata_sink.get_path()}")
+    logging.info(f"Metadata sink opened: {metadata_sink.get_path()}")
 
-    print("[DEBUG] Starting add_vectors_streaming function")
+    logging.debug("Starting add_vectors_streaming function")
     add_vectors_streaming(args, index, model, encoder, metadata_sink)
-    print("[DEBUG] add_vectors_streaming completed successfully")
+    logging.debug("add_vectors_streaming completed successfully")
 
-    print("[DEBUG] Closing metadata sink")
+    logging.debug("Closing metadata sink")
     metadata_sink.close()
-    print(f"[INFO] Metadata sink closed.")
+    logging.info("Metadata sink closed.")
+    
+    # Log end time and total duration
+    end_time = time.time()
+    total_duration = end_time - start_time
+    logging.info(f"=== INDEX BUILDING COMPLETED at {time.strftime('%Y-%m-%d %H:%M:%S')} ===")
+    logging.info(f"Total execution time: {total_duration:.2f} seconds ({total_duration/60:.2f} minutes)")
 
 
 if __name__ == "__main__":

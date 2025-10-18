@@ -1,0 +1,41 @@
+conda create -n llama-cuda
+ conda activate /StudentData/rag2
+ conda deactivate
+ conda create -n llama-cuda
+ df -h
+ conda create -p /StudentData/llama-cuda llama-cuda
+ conda create -p /StudentData/llama-cuda 
+ conda activate /StudentData/llama-cuda
+ # 1) Fresh env
+ conda create -n llama-cuda python=3.11 -y
+ conda activate llama-cuda
+ # 2) Tooling + CUDA runtime
+ # (cudatoolkit brings the CUDA libs; cmake/ninja make the build faster/reliable)
+ conda install -c conda-forge cudatoolkit>=12 cmake ninja git -y
+ # 3) Build and install python-llama-cpp with CUDA/cuBLAS
+ #   CMAKE_ARGS toggles CUDA; FORCE_CMAKE ensures a local build (not a CPU wheel)
+ export CMAKE_ARGS="-DLLAMA_CUBLAS=on"
+ export FORCE_CMAKE=1
+ pip install --no-cache-dir --upgrade --force-reinstall llama-cpp-python
+ conda install -c conda-forge cudatoolkit=11.8 cmake
+ export CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=52"
+ export FORCE_CMAKE=1
+ # Force a local build (avoid prebuilt CPU wheels)
+ pip install --no-cache-dir --upgrade --force-reinstall llama-cpp-python
+ # 2) Install NVCC 11.8 (the compiler) from NVIDIA's 11.8 channel
+ conda install -y -c nvidia/label/cuda-11.8.0 cuda-nvcc=11.8.89
+ # 3) Ensure the build uses the conda CUDA toolchain (not /usr/local/cuda 12.x)
+ export CUDACXX="$CONDA_PREFIX/bin/nvcc"
+ export CUDA_HOME="$CONDA_PREFIX"
+ export CUDA_PATH="$CONDA_PREFIX"
+ export CUDA_TOOLKIT_ROOT_DIR="$CONDA_PREFIX"
+ export PATH="$CONDA_PREFIX/bin:$PATH"
+ export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+ # Sanity check: should print release 11.8
+ nvcc --version
+ # 4) Build python-llama-cpp for M60 (sm_52) using the NEW flag
+ export CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=52 -DCUDAToolkit_ROOT=$CONDA_PREFIX"
+ export FORCE_CMAKE=1
+ pip install --no-cache-dir --upgrade --force-reinstall llama-cpp-python
+ conda remove -y cudatoolkit
+ conda install -y -c nvidia/label/cuda-11.8.0 cuda-toolkit=11.8.0

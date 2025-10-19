@@ -1,16 +1,3 @@
-"""
-Complete Pipeline: Download, Extract, Index, Evaluate
-
-This script handles the entire process:
-1. Check if data is downloaded
-2. Extract CSV from split zip
-3. Preprocess and sample data
-4. Build index
-5. Run RAG vs Llama evaluation
-
-Professional script in English, no emojis.
-"""
-
 import os
 import sys
 import time
@@ -22,7 +9,6 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 
 def check_data_downloaded():
-    """Check if all parts of the dataset are downloaded."""
     print("="*80)
     print("STEP 1: CHECKING DOWNLOADED DATA")
     print("="*80)
@@ -58,7 +44,6 @@ def check_data_downloaded():
 
 
 def extract_csv():
-    """Extract CSV from split zip archive."""
     print("\n" + "="*80)
     print("STEP 2: EXTRACTING CSV")
     print("="*80)
@@ -115,7 +100,6 @@ def extract_csv():
 
 
 def sample_and_prepare_data(sample_size=1000):
-    """Sample and prepare data for evaluation."""
     print("\n" + "="*80)
     print(f"STEP 3: PREPARING DATA (sampling {sample_size} articles)")
     print("="*80)
@@ -208,7 +192,6 @@ def sample_and_prepare_data(sample_size=1000):
 
 
 def build_index(train_csv):
-    """Build FAISS index from training data."""
     print("\n" + "="*80)
     print("STEP 4: BUILDING INDEX")
     print("="*80)
@@ -273,7 +256,6 @@ def run_evaluation(test_csv, store_path):
 
 
 def main():
-    """Main pipeline."""
     print("COMPLETE RAG EVALUATION PIPELINE")
     print("Download -> Extract -> Prepare -> Build Index -> Evaluate")
     print()

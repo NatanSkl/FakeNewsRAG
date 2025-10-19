@@ -431,9 +431,33 @@ def retrieve_evidence(store: Store,
             logger.warning(f"MMR diversification failed: {e}")
             # Continue without diversification if it fails
     
-    # Step 6: Return top k results
+    # Step 6: Add full content to each result
+    logger.info("Step 6: Adding full content to results...")
+    
+    # Get top k results first
     final_results = results[:retrieval_config.k]
     
+    for i, result in enumerate(final_results):
+        vector_id = result.get("vector_id")
+        if vector_id is not None:
+            try:
+                full_data = get_data_from_vector_id(store, int(vector_id))
+                if full_data and "content" in full_data:
+                    result["full_content"] = full_data["content"]
+                    logger.debug(f"Added full content for result {i+1}: {len(full_data['content'])} chars")
+                else:
+                    logger.warning(f"Could not get full content for vector_id {vector_id}")
+                    result["full_content"] = result.get("content", "")  # Fallback to existing content
+            except Exception as e:
+                logger.warning(f"Error getting full content for vector_id {vector_id}: {e}")
+                result["full_content"] = result.get("content", "")  # Fallback to existing content
+        else:
+            logger.warning(f"Result {i+1} has no vector_id, using existing content")
+            result["full_content"] = result.get("content", "")
+    
+    logger.info(f"Added full content to {len(final_results)} results")
+    
+    # Step 7: Return top k results
     logger.info(f"Final results: {len(final_results)} evidence items")
     logger.info("Evidence retrieval completed successfully!")
     
@@ -699,7 +723,6 @@ def get_data_from_vector_id(store: Store, vector_id: int) -> Optional[Dict[str, 
     return {
         "vector_id": int(vector_id),
         "db_id": db_id,
-        "chunk_id": 0,  # Default chunk_id since we don't have chunking info in original
         "label": row['label'],
         "title": row['title'],
         "content": row['content'],
@@ -743,182 +766,3 @@ def query_once(store: Store, query: str, k: int = 10, nprobe: int = 16):
             **data
         })
     return results
-
-
-# def hybrid_query(
-#     store: Store,
-#     query: str,
-#     k: int = 10,
-#     k_fa: int = 10,
-#     k_bm: int = 50,
-#     alpha: float = 0.5,
-#     nprobe: int = 16,
-#     tokenizer_fn = None
-# ):
-#     """
-#     Hybrid query using Store object.
-#
-#     Args:
-#         store: Store object containing index, BM25, and metadata
-#         query: Query string
-#         k: Number of final results to return
-#         k_fa: Number of FAISS results to retrieve
-#         k_bm: Number of BM25 results to retrieve
-#         alpha: Weight for FAISS vs BM25 (0.5 = equal weight)
-#         nprobe: Number of clusters to search for IVF indices
-#         tokenizer_fn: Tokenizer function (auto-detected from build args if None)
-#
-#     Returns:
-#         List of result dictionaries with hybrid scores
-#     """
-#     if tokenizer_fn is None:
-#         # Auto-detect tokenizer based on build args stored in store
-#         tokenizer_fn = get_appropriate_tokenizer(store)
-#
-#     if store.bm25 is None:
-#         raise ValueError("BM25 is not available in the store")
-#
-#     # FAISS retrieval
-#     store.index.nprobe = nprobe
-#     q_emb = embed_and_normalize([query], store.emb)
-#     D_fa, I_fa = store.index.search(q_emb, k_fa)
-#     faiss_scores = {int(vid): float(score) for vid, score in zip(I_fa[0], D_fa[0]) if vid != -1}
-#
-#     # BM25 retrieval using bm25.get_scores
-#     q_tokens = tokenizer_fn(query)
-#     bm25_scores_array = store.bm25.get_scores(q_tokens)       # scores per document index
-#     # pick top document indices from BM25
-#     top_bm25_idxs = np.argsort(bm25_scores_array)[::-1][:k_bm]
-#     bm25_scores = {}
-#
-#     # TODO optimize, create these once in load_store
-#     v2d_len = len(store.v2d)
-#     v2d_list = list(store.v2d.keys())
-#
-#     for doc_idx in top_bm25_idxs:
-#         # We need to map doc_idx to vector_id
-#         # Since BM25 was built with the same order as the index, we can use the v2d mapping
-#         # But we need to find the vector_id that corresponds to this doc_idx
-#         # This is a bit tricky - we need to find which vector_id maps to this document position
-#         # For now, let's assume the BM25 corpus order matches the vector order
-#         if doc_idx < v2d_len:
-#             # Get the vector_id at this position (assuming order is preserved)
-#             vector_id = v2d_list[doc_idx]
-#             bm25_scores[int(vector_id)] = float(bm25_scores_array[doc_idx])
-#
-#     # Normalize each score type to [0,1]
-#     max_fa = max(faiss_scores.values()) if faiss_scores else 1.0
-#     max_bm = max(bm25_scores.values()) if bm25_scores else 1.0
-#
-#     candidates = set(faiss_scores) | set(bm25_scores)
-#     results = []
-#     for vid in candidates:
-#         norm_fa = faiss_scores.get(vid, 0.0) / max_fa
-#         norm_bm = bm25_scores.get(vid, 0.0) / max_bm
-#         hybrid_score = alpha * norm_fa + (1 - alpha) * norm_bm
-#
-#         # Get data from vector_id using the extracted function
-#         data = get_data_from_vector_id(store, int(vid))
-#
-#         results.append({
-#             "score": hybrid_score,
-#             "faiss_score": faiss_scores.get(vid, 0.0),
-#             "bm25_score": bm25_scores.get(vid, 0.0),
-#             **data
-#         })
-#
-#     results.sort(key=lambda x: x["score"], reverse=True)
-#     return results[:k]
-def hybrid_query(
-    store: Store,
-    query: str,
-    k: int = 10,
-    k_fa: int = 10,
-    k_bm: int = 50,
-    alpha: float = 0.5,
-    nprobe: int = 16,
-    tokenizer_fn = None,
-    # NEW:
-    diversify: Optional[str] = None,     # None | "mmr" | "xquad" | "both"
-    diversify_k: Optional[int] = None,   # pool to diversify from (defaults to k)
-    mmr_lambda: float = 0.5,
-    xquad_alpha: float = 0.7,
-    xquad_beta: float = 0.3,
-    xquad_aspects: Optional[List[str]] = None,
-    both_mode: str = "sequential",       # for method="both"
-    both_order: str = "mmr->xquad",      # for method="both" & sequential
-    both_gamma: float = 0.5              # for method="both" & blended
-):
-    """
-    Hybrid query using Store object, with optional diversity-aware re-ranking.
-    """
-    if tokenizer_fn is None:
-        tokenizer_fn = get_appropriate_tokenizer(store)
-
-    if store.bm25 is None:
-        raise ValueError("BM25 is not available in the store")
-
-    # FAISS retrieval
-    store.index.nprobe = nprobe
-    q_emb = embed_and_normalize([query], store.emb)
-    D_fa, I_fa = store.index.search(q_emb, k_fa)
-    faiss_scores = {int(vid): float(score) for vid, score in zip(I_fa[0], D_fa[0]) if vid != -1}
-
-    # BM25 retrieval
-    q_tokens = tokenizer_fn(query)
-    bm25_scores_array = store.bm25.get_scores(q_tokens)
-    top_bm25_idxs = np.argsort(bm25_scores_array)[::-1][:k_bm]
-
-    v2d_list = _v2d_list(store)
-    bm25_scores = {}
-    for doc_idx in top_bm25_idxs:
-        if doc_idx < len(v2d_list):
-            vector_id = v2d_list[doc_idx]
-            bm25_scores[int(vector_id)] = float(bm25_scores_array[doc_idx])
-
-    # Normalize each score type robustly
-    norm_fa = _normalize_scores(faiss_scores)
-    norm_bm = _normalize_scores(bm25_scores)
-
-    # Merge candidates; compute hybrid score
-    candidates = set(faiss_scores) | set(bm25_scores)
-    results = []
-    for vid in candidates:
-        nf = norm_fa.get(vid, 0.0)
-        nb = norm_bm.get(vid, 0.0)
-        hybrid_score = alpha * nf + (1.0 - alpha) * nb
-        data = get_data_from_vector_id(store, int(vid))
-        results.append({
-            "score": hybrid_score,
-            "faiss_score": faiss_scores.get(vid, 0.0),
-            "bm25_score": bm25_scores.get(vid, 0.0),
-            **(data or {"vector_id": int(vid), "db_id": None, "content": ""})
-        })
-
-    results.sort(key=lambda x: x["score"], reverse=True)
-
-    # Keep a larger pool before diversification (helps both MMR and xQuAD)
-    pool_size = max(k, diversify_k or k)
-    results = results[:pool_size]
-
-    # Dedup → (optional) diversity
-    results = diversify_results(
-        store=store,
-        query_text=query,
-        results=results,
-        method=diversify,           # None | "mmr" | "xquad" | "both"
-        top_k=k,
-        mmr_lambda=mmr_lambda,
-        xquad_alpha=xquad_alpha,
-        xquad_beta=xquad_beta,
-        xquad_aspects=xquad_aspects,
-        tokenizer_fn=tokenizer_fn,
-        content_key="content",
-        both_mode=both_mode,
-        both_order=both_order,
-        both_gamma=both_gamma
-    )
-
-    return results[:k]
-
-

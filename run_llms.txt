@@ -1,3 +1,10 @@
+ export CUDACXX="$CONDA_PREFIX/bin/nvcc"
+ export CUDA_HOME="$CONDA_PREFIX"
+ export CUDA_PATH="$CONDA_PREFIX"
+ export CUDA_TOOLKIT_ROOT_DIR="$CONDA_PREFIX"
+ export PATH="$CONDA_PREFIX/bin:$PATH"
+ export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+
 Llama:
 python -m llama_cpp.server \
   --model ./models/llama32-3b/Llama-3.2-3B-Instruct-Q4_K_M.gguf \

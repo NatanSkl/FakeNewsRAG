@@ -139,7 +139,7 @@ def classify_article_rag(
         EvidenceChunk(
             id=h.get("db_id", "unknown"),
             title=h.get("title", ""),
-            text=h["content"],
+            text=h["full_content"],  # Use full_content if available, fallback to content
             label="fake"
         )
         for h in fake_hits
@@ -149,7 +149,7 @@ def classify_article_rag(
         EvidenceChunk(
             id=h.get("db_id", "unknown"),
             title=h.get("title", ""),
-            text=h["content"],
+            text=h["full_content"],  # Use full_content if available, fallback to content
             label="reliable"
         )
         for h in credible_hits

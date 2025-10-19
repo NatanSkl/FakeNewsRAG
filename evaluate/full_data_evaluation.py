@@ -1,20 +1,3 @@
-"""
-Complete RAG vs Llama Evaluation System
-
-This script provides a comprehensive comparison between:
-1. RAG (Retrieval-Augmented Generation) pipeline
-2. Llama 3.2 3B baseline LLM
-
-Features:
-- Batch processing for large datasets
-- Real performance metrics (Accuracy, Precision, Recall, F1)
-- Visualization with graphs
-- Detailed comparison reports
-- Professional output in English only
-
-No emojis, production-ready code.
-"""
-
 import sys
 import os
 import json
@@ -37,7 +20,6 @@ from common.llm_client import Llama
 
 @dataclass
 class EvaluationMetrics:
-    """Metrics for evaluation results."""
     accuracy: float
     precision: float
     recall: float
@@ -56,7 +38,6 @@ class EvaluationMetrics:
 
 @dataclass
 class ArticleResult:
-    """Result for a single article classification."""
     article_id: str
     true_label: str
     predicted_label: str
@@ -67,7 +48,6 @@ class ArticleResult:
 
 
 class ResultsVisualizer:
-    """Generate visualization graphs for evaluation results."""
     
     def __init__(self, output_dir: Path):
         self.output_dir = output_dir
@@ -177,7 +157,6 @@ class ResultsVisualizer:
 
 
 class RAGvsLlamaEvaluator:
-    """Main evaluator for comparing RAG and Llama."""
     
     def __init__(self, store_path: str, output_dir: str = "evaluate/results"):
         self.store_path = store_path
@@ -195,7 +174,6 @@ class RAGvsLlamaEvaluator:
         print()
     
     def initialize(self):
-        """Initialize LLM and store."""
         print("INITIALIZATION")
         print("-"*80)
         
@@ -227,7 +205,6 @@ class RAGvsLlamaEvaluator:
         print("="*80)
     
     def test_llama_baseline(self, articles: List[Dict]) -> Tuple[List[ArticleResult], EvaluationMetrics]:
-        """Test Llama baseline on articles."""
         print("\nTEST 1: LLAMA BASELINE")
         print("-"*80)
         print(f"Testing on {len(articles)} articles...")
@@ -302,7 +279,6 @@ Classification (respond with only FAKE or RELIABLE):"""
         return results, metrics
     
     def test_rag_pipeline(self, articles: List[Dict]) -> Tuple[List[ArticleResult], EvaluationMetrics]:
-        """Test RAG pipeline on articles."""
         print("\nTEST 2: RAG PIPELINE")
         print("-"*80)
         print(f"Testing on {len(articles)} articles...")
@@ -365,7 +341,6 @@ Classification (respond with only FAKE or RELIABLE):"""
         return results, metrics
     
     def _calculate_metrics(self, results: List[ArticleResult], total_time: float) -> EvaluationMetrics:
-        """Calculate evaluation metrics from results."""
         # Count TP, FP, TN, FN
         tp = sum(1 for r in results if r.true_label == "fake" and r.predicted_label == "fake")
         fp = sum(1 for r in results if r.true_label == "reliable" and r.predicted_label == "fake")
@@ -401,7 +376,6 @@ Classification (respond with only FAKE or RELIABLE):"""
         rag_results: List[ArticleResult],
         rag_metrics: EvaluationMetrics
     ):
-        """Generate comparison report and visualizations."""
         print("\n" + "="*80)
         print("COMPARISON REPORT")
         print("="*80)
@@ -468,7 +442,6 @@ Classification (respond with only FAKE or RELIABLE):"""
 
 
 def load_test_data(csv_path: str, max_articles: int = None) -> List[Dict]:
-    """Load test data from CSV file."""
     print(f"\nLoading test data from: {csv_path}")
     
     if not Path(csv_path).exists():
@@ -499,7 +472,6 @@ def load_test_data(csv_path: str, max_articles: int = None) -> List[Dict]:
 
 
 def main():
-    """Main evaluation function."""
     import argparse
     
     parser = argparse.ArgumentParser(description="RAG vs Llama Evaluation")

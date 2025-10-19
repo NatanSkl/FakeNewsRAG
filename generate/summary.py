@@ -87,13 +87,13 @@ SUMMARY_SYSTEM = (
 
 SUMMARY_USER_TEMPLATE = (
     """
-EVIDENCE ({label_upper})
+EVIDENCE
 -----------------------
 {evidence_bullets}
 
 TASK
 ----
-Write a concise summary explaining of the EVIDENCE.
+Write a concise fact summary explaining of the EVIDENCE. Limit to 300 tokens.
 """
 )
 
@@ -150,8 +150,6 @@ def contrastive_summaries(
         #q_title=q_title,
         #q_body=q_body,
         evidence_bullets=_format_evidence_bullets(fake_evidence),
-        label_upper="FAKE",
-        label_lower="fake"
     )
     
     logger.info("Generating reliable evidence prompt...")
@@ -159,8 +157,6 @@ def contrastive_summaries(
         #q_title=q_title,
         #q_body=q_body,
         evidence_bullets=_format_evidence_bullets(reliable_evidence),
-        label_upper="RELIABLE",
-        label_lower="reliable"
     )
 
     # Log the prompts

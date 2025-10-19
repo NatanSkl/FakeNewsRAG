@@ -84,7 +84,7 @@ def test_rag_pipeline(
     
     # Configure retrieval
     retrieval_config = RetrievalConfig(
-        k=10,  # Number of results to return
+        k=8,  # Number of results to return
         ce_model=ce_model,  # No cross-encoder for testing
         ce_model_name=ce_model_name,  # No cross-encoder model name for testing
         diversity_type="mmr",  # No diversity for testing

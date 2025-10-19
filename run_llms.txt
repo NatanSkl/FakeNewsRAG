@@ -8,7 +8,7 @@
 Llama:
 python -m llama_cpp.server \
   --model ./models/llama32-3b/Llama-3.2-3B-Instruct-Q4_K_M.gguf \
-  --n_gpu_layers -1 --n_ctx 2048 --n_batch 256 --offload_kqv true \
+  --n_gpu_layers -1 --n_ctx 4096 --n_batch 256 --offload_kqv true \
   --host 127.0.0.1 --port 8010
 
 Mistral:
@@ -16,6 +16,15 @@ python -m llama_cpp.server \
   --model ./models/mistral-7b-instruct/mistral-7b-instruct-v0.2.Q4_K_M.gguf \
   --n_gpu_layers -1 --n_ctx 2048 --n_batch 256 --offload_kqv true \
   --host 127.0.0.1 --port 8011
+
+Gemma:
+python -m llama_cpp.server \
+  --model /home/student/models/gemma-3-1b-it-Q4_K_M.gguf \
+  --n_gpu_layers -1 \
+  --n_ctx 4096 \
+  --n_batch 192 \
+  --offload_kqv true \
+  --host 127.0.0.1 --port 8012
 
 
 

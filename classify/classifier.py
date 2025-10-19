@@ -9,7 +9,27 @@ import os
 from dataclasses import dataclass
 from typing import Dict, Optional
 
+import tiktoken
+
 from common.llm_client import LocalLLM
+
+
+def _trim_tokens(s: str, max_tokens: int) -> str:
+    """Trim text to approximately max_tokens using tiktoken encoding."""
+    s = (s or "").strip()
+    if not s:
+        return s
+    
+    # Use cl100k_base encoding (GPT-4 tokenizer)
+    encoder = tiktoken.get_encoding("cl100k_base")
+    tokens = encoder.encode(s)
+    
+    if len(tokens) <= max_tokens:
+        return s
+    
+    # Truncate to max_tokens and decode back to text
+    truncated_tokens = tokens[:max_tokens]
+    return encoder.decode(truncated_tokens)
 
 
 @dataclass
@@ -30,6 +50,8 @@ CLASSIFICATION_SYSTEM = (
     "Consider which evidence better aligns with the facts presented in the article. "
     "Provide a clear classification with reasoning."
 )
+
+# TODO add limits to these templates
 
 CLASSIFICATION_USER_TEMPLATE = (
     """
@@ -57,7 +79,7 @@ Consider:
 
 Respond with:
 - Classification: [FAKE/RELIABLE]
-- Confidence: [0.0-1.0]
+- Confidence: [0.0-1.0]   This should be a number between 0 and 1 that represents the confidence in your classification.
 - Reasoning: [Brief explanation of your decision]
 
 Format your response exactly as:
@@ -93,12 +115,17 @@ def classify_article(
         ClassificationResult with prediction, confidence, reasoning, and raw response
     """
     
+    # Apply token limits
+    article_content_trimmed = _trim_tokens(article_content, 600)
+    fake_summary_trimmed = _trim_tokens(fake_summary, 300)
+    reliable_summary_trimmed = _trim_tokens(reliable_summary, 300)
+    
     # Format the prompt
     prompt = CLASSIFICATION_USER_TEMPLATE.format(
         article_title=article_title,
-        article_content=article_content,
-        fake_summary=fake_summary,
-        reliable_summary=reliable_summary
+        article_content=article_content_trimmed,
+        fake_summary=fake_summary_trimmed,
+        reliable_summary=reliable_summary_trimmed
     )
     
     # Create messages for the LLM

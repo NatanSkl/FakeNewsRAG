@@ -79,3 +79,6 @@ index_tmp/store_full/
 index/data/
 index/store_slice
 models/
+
+experiments/
+metrics/

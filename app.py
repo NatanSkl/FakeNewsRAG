@@ -1,103 +1,145 @@
-import json
-from pathlib import Path
-import streamlit as st
-
-from pipeline import classify_article_rag, RAGOutput
-from common.llm_client import Llama, Mistral
 #python -m streamlit run app.py
+import streamlit as st
+import io
+import sys
+import contextlib
+import logging
+from datetime import datetime
+from pipeline.test_rag_pipeline import test_rag_pipeline
 
-# TODO test retrieval code
-# TODO create eylon's index on a mini version of the dataset
+# ----------------- Streamlit setup -----------------
+st.set_page_config(page_title="📰 FakeNews RAG", layout="wide")
 
-st.set_page_config(page_title="FakeNews RAG — Real vs Fake", layout="wide")
-st.title("📰 FakeNews RAG")
+st.markdown(
+    """
+    <h1 style='text-align:center;'>📰 FakeNews RAG</h1>
+    <p style='text-align:center; color:gray; font-size:16px'>
+    Retrieval-Augmented Fake News Detection — step-by-step progress viewer.
+    </p>
+    """,
+    unsafe_allow_html=True
+)
 
-with st.sidebar:
-    st.header("Index & Model")
-    store_dir = st.text_input("Store directory", "mini_index/store")
-    model_choice = st.selectbox("LLM", ["Llama (default)", "Mistral"])
-    topn = st.slider("Evidence per label", 4, 24, 12, 1)
-    st.caption("Tip: if results feel off, rebuild your mini index with bge-large, and increase top-k in retrieval.")
+# ----------------- Defaults -----------------
+STORE_DIR = "/StudentData/index"
+#STORE_DIR = "./index"
+LLM_URL = "http://127.0.0.1:8010"
+LLM_TYPE = "llama"
 
-st.subheader("1) Paste an article")
-title = st.text_input("Title (optional, helps retrieval)")
-text = st.text_area("Article body", height=260, placeholder="Paste the full article here…")
+# ----------------- Inputs -----------------
+st.subheader("1️⃣ Paste an article")
+title = st.text_input("Title (optional)")
+content = st.text_area("Article content", height=250, placeholder="Paste the article body here…")
 
-run = st.button("⚖️ Analyze authenticity")
+# ----------------- Helpers -----------------
+def disable_all_loggers():
+    """Silence all loggers (so only prints appear)."""
+    for name in logging.root.manager.loggerDict:
+        logging.getLogger(name).disabled = True
+    logging.getLogger().disabled = True
 
-def verdict_badge(pred: str) -> str:
-    if pred.lower() == "fake":
-        return "🚩 **FAKE**"
-    elif pred.lower() == "reliable":
-        return "✅ **RELIABLE**"
-    return f"ℹ️ {pred}"
 
-if run:
-    if not text or len(text.strip()) < 40:
-        st.warning("Please paste at least ~40 characters of article text.")
-        st.stop()
+def run_pipeline_with_capture(title: str, content: str):
+    """Run the RAG pipeline and capture printed output + exceptions."""
+    output_capture = io.StringIO()
+    result = None
+    error_msg = None
+    start_time = datetime.now()
 
-    # choose LLM client
-    llm = Llama() if model_choice.startswith("Llama") else Mistral()
-
-    with st.spinner("Retrieving evidence, summarizing, and classifying…"):
+    with contextlib.redirect_stdout(output_capture):
         try:
-            out: RAGOutput = classify_article_rag(
-                article_title=title,
-                article_content=text,
-                store_dir=store_dir,
-                llm=llm,
-                title_hint=title,
-                topn_per_label=topn,
+            print(f"[{start_time.strftime('%H:%M:%S')}] Starting RAG pipeline test...")
+            result = test_rag_pipeline(
+                article_title=title or "(untitled)",
+                article_content=content,
+                store_path=STORE_DIR,
+                llm_url=LLM_URL,
+                llm_type=LLM_TYPE,
+                verbose=False,
             )
         except Exception as e:
-            st.exception(e)
-            st.stop()
+            error_msg = f"Pipeline execution error: {e}"
+            import traceback
+            traceback.print_exc(file=output_capture)
+
+    return result, output_capture.getvalue(), error_msg
 
 
-    st.subheader("2) Verdict")
-    c1, c2, c3 = st.columns([1, 1, 4])
-    with c1:
-        st.markdown(verdict_badge(out.classification.prediction))
-    with c2:
-        st.metric("Confidence", f"{out.classification.confidence:.2f}")
-    with c3:
-        st.write("**Reasoning:**", out.classification.reasoning)
+def update_stage(stage_text, color="blue"):
+    """Display or update the current stage label dynamically."""
+    emoji_map = {
+        "blue": "🔵",
+        "green": "🟢",
+        "purple": "🟣",
+        "orange": "🟠",
+        "red": "🔴",
+        "gray": "⚪",
+    }
+    stage_placeholder.markdown(
+        f"<h4 style='text-align:center;color:{color};'>{emoji_map.get(color,'🔵')} Current Stage: {stage_text}</h4>",
+        unsafe_allow_html=True,
+    )
 
 
-    tab1, tab2 = st.tabs(["✅ Reliable evidence", "🚩 Fake evidence"])
+# ----------------- Run Button -----------------
+if st.button("⚖️ Analyze"):
+    if not content.strip():
+        st.warning("Please paste article content first.")
+        st.stop()
 
-    def _evidence_table(items):
-        return [{
-            "chunk_id": c.id,
-            "title": c.title[:120],
-            "snippet": c.text[:300],
-        } for c in items]
+    disable_all_loggers()  # silence logger spam
 
-    with tab1:
-        st.markdown("#### Summary (reliable)")
-        st.write(out.reliable_summary or "(no summary)")
-        st.markdown("#### Evidence used")
-        st.dataframe(_evidence_table(out.reliable_evidence), use_container_width=True)
-        pack = {
-            "label": "reliable",
-            "query_title": title, "query_text": text,
-            "summary": out.reliable_summary,
-            "evidence": [c.__dict__ for c in out.reliable_evidence],
-        }
-        st.download_button("⬇️ Download reliable pack (JSON)", data=json.dumps(pack, ensure_ascii=False, indent=2),
-                           file_name="reliable_pack.json", mime="application/json")
+    st.info("🧠 Running FakeNews RAG pipeline… it might take few minutes.")
+    progress = st.progress(0)
+    stage_placeholder = st.empty()
 
-    with tab2:
-        st.markdown("#### Summary (fake)")
-        st.write(out.fake_summary or "(no summary)")
-        st.markdown("#### Evidence used")
-        st.dataframe(_evidence_table(out.fake_evidence), use_container_width=True)
-        pack = {
-            "label": "fake",
-            "query_title": title, "query_text": text,
-            "summary": out.fake_summary,
-            "evidence": [c.__dict__ for c in out.fake_evidence],
-        }
-        st.download_button("⬇️ Download fake pack (JSON)", data=json.dumps(pack, ensure_ascii=False, indent=2),
-                           file_name="fake_pack.json", mime="application/json")
+    # ---- Stage transitions ----
+    update_stage("Initializing LLM and store", color="blue")
+    progress.progress(10)
+    st.write("Loading FAISS index and embedding model…")
+
+    update_stage("Retrieving evidence", color="green")
+    progress.progress(35)
+    st.write("Searching for relevant fake and reliable evidence chunks…")
+
+    update_stage("Generating contrastive summaries", color="purple")
+    progress.progress(60)
+    st.write("Calling LLM to summarize fake vs reliable evidence…")
+
+    update_stage("Classifying article", color="orange")
+    progress.progress(85)
+    st.write("Comparing summaries and deciding if article is fake or reliable…")
+
+    # ---- Run pipeline ----
+    result, printed_output, error_msg = run_pipeline_with_capture(title, content)
+
+    progress.progress(100)
+
+    # ---- Outcome ----
+    st.subheader("📜 Pipeline Output")
+    st.text_area("Console output", printed_output, height=300)
+
+    if error_msg or result is None:
+        update_stage("Pipeline failed!", color="red")
+        st.error("❌ Pipeline failed! See printed output above for details.")
+    else:
+        update_stage("Pipeline completed successfully!", color="green")
+        st.success("✅ Pipeline completed successfully!")
+
+        # ---- Show classification ----
+        st.subheader("2️⃣ Classification Result")
+        verdict = result.classification.prediction.upper()
+        conf = result.classification.confidence
+
+        if verdict == "FAKE":
+            st.markdown("### 🚩 **FAKE NEWS DETECTED**")
+        else:
+            st.markdown("### ✅ **RELIABLE ARTICLE**")
+
+        st.metric("Confidence", f"{conf:.2f}")
+        st.write("**Reasoning:**", result.classification.reasoning)
+
+        st.markdown("#### 🟥 Fake Summary")
+        st.write(result.fake_summary)
+        st.markdown("#### 🟩 Reliable Summary")
+        st.write(result.reliable_summary)

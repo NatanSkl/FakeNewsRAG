@@ -138,9 +138,6 @@ Limit to 300 tokens.
     )
 ]
 
-SUMMARY_SYSTEM = SUMMARY_SYSTEMS[0]
-SUMMARY_USER_TEMPLATE = SUMMARY_USER_TEMPLATES[0]
-
 
 def _format_evidence_bullets(chunks: List[EvidenceChunk], max_tokens: int = 300) -> str:
     """Format evidence chunks into a long string with article headers."""
@@ -162,6 +159,7 @@ def _format_evidence_bullets(chunks: List[EvidenceChunk], max_tokens: int = 300)
 
 # ----------------------------- public API -----------------------------
 
+
 def contrastive_summaries(
     llm: LocalLLM,
     query: Article,
@@ -169,6 +167,7 @@ def contrastive_summaries(
     reliable_evidence: List[EvidenceChunk],
     temperature: float = 0.2,
     max_tokens: int = 600,
+    promt_type: int = 0,
 ) -> Dict[str, str]:
     """Produce two summaries conditioned on the same query with different evidence sets.
 
@@ -179,46 +178,56 @@ def contrastive_summaries(
         reliable_evidence: List of EvidenceChunk objects labeled as "reliable"
         temperature: LLM temperature for generation
         max_tokens: Maximum tokens for each summary
+        promt_type: Prompt type (0 = general persona, 1 = persona with background information, 2 = new article)
 
     Returns:
         Dict with keys "fake_summary" and "reliable_summary" containing the generated summaries
     """
+    summary_system = SUMMARY_SYSTEMS[promt_type]
+    summary_user_template = SUMMARY_USER_TEMPLATES[promt_type]
+
     logger.info(f"Starting contrastive summaries generation for query: '{query.title[:50]}...'")
     logger.info(f"Fake evidence: {len(fake_evidence)} chunks, Reliable evidence: {len(reliable_evidence)} chunks")
-    
+
     q_title = _trim(query.title or "(untitled)", 160)
     q_body = _trim(query.text, 2000)
 
     logger.info("Generating fake evidence prompt...")
-    prompt_fake = SUMMARY_USER_TEMPLATE.format(
-        #q_title=q_title,
-        #q_body=q_body,
+    prompt_fake = summary_user_template.format(
+        # q_title=q_title,
+        # q_body=q_body,
         evidence_bullets=_format_evidence_bullets(fake_evidence),
     )
-    
+
     logger.info("Generating reliable evidence prompt...")
-    prompt_reliable = SUMMARY_USER_TEMPLATE.format(
-        #q_title=q_title,
-        #q_body=q_body,
+    prompt_reliable = summary_user_template.format(
+        # q_title=q_title,
+        # q_body=q_body,
         evidence_bullets=_format_evidence_bullets(reliable_evidence),
     )
 
     # Log the prompts
     logger.info("=== FAKE EVIDENCE PROMPT ===")
-    logger.info(f"System: {SUMMARY_SYSTEM}")
+    logger.info(f"System: {summary_system}")
     logger.info(f"User: {prompt_fake}")
-    
+
     logger.info("=== RELIABLE EVIDENCE PROMPT ===")
-    logger.info(f"System: {SUMMARY_SYSTEM}")
+    logger.info(f"System: {summary_system}")
     logger.info(f"User: {prompt_reliable}")
 
-    msgs_fake = [{"role": "system", "content": SUMMARY_SYSTEM}, {"role": "user", "content": prompt_fake}]
-    msgs_reliable = [{"role": "system", "content": SUMMARY_SYSTEM}, {"role": "user", "content": prompt_reliable}]
+    msgs_fake = [
+        {"role": "system", "content": summary_system},
+        {"role": "user", "content": prompt_fake},
+    ]
+    msgs_reliable = [
+        {"role": "system", "content": summary_system},
+        {"role": "user", "content": prompt_reliable},
+    ]
 
     logger.info(f"Calling LLM for fake summary (temperature={temperature}, max_tokens={max_tokens})...")
     resp_fake = llm.chat(msgs_fake, temperature=temperature, max_tokens=max_tokens)
     logger.info(f"Fake summary generated: {len(resp_fake.text)} characters")
-    
+
     logger.info(f"Calling LLM for reliable summary (temperature={temperature}, max_tokens={max_tokens})...")
     resp_reliable = llm.chat(msgs_reliable, temperature=temperature, max_tokens=max_tokens)
     logger.info(f"Reliable summary generated: {len(resp_reliable.text)} characters")

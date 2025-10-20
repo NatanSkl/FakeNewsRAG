@@ -97,67 +97,67 @@ def _generate_classification_template(
     order = random.randint(0, 1)
 
     template_1 = f"""
-    ARTICLE TO CLASSIFY
-    -------------------
-    Title: {{article_title}}
-    Content: {{article_content}}"""
+ARTICLE TO CLASSIFY
+-------------------
+Title: {{article_title}}
+Content: {{article_content}}
+"""
 
     if order == 0:
         template_2 = f"""
-    
-    {fake_name}
-    {"-" * len(fake_name)}
-    {{fake_summary}}
-    
-    {reliable_name}
-    {"-" * len(reliable_name)}
-    {{reliable_summary}}
-        """
+{fake_name}
+{"-" * len(fake_name)}
+{{fake_summary}}
+
+{reliable_name}
+{"-" * len(reliable_name)}
+{{reliable_summary}}
+    """
     else:
         template_2 = f"""
-    
-    {reliable_name}
-    {"-" * len(reliable_name)}
-    {{reliable_summary}}
-    
-    {fake_name}
-    {"-" * len(fake_name)}
-    {{fake_summary}}
+{reliable_name}
+{"-" * len(reliable_name)}
+{{reliable_summary}}
+
+{fake_name}
+{"-" * len(fake_name)}
+{{fake_summary}}
     """
 
     if promt_type <= 1:
         template_3 = f"""
-    TASK
-    ___
-    Based on the summaries above, determine if the article is {names[0]} or {names[1]}.
-    
-    Consider:
-    1. Which summary better aligns with the facts in the article?
-    2. Are there contradictions between the article and facts mentioned in the summary?
-    3. Does the article contain claims that are supported by the summary?
+TASK
+___
+Based on the summaries above, determine if the article is {names[0]} or {names[1]}.
+
+Consider:
+1. Which summary better aligns with the facts in the article?
+2. Are there contradictions between the article and facts mentioned in the summary?
+3. Does the article contain claims that are supported by the summary?
     """
     else:
         template_3 = f"""
-    TASK
-    ___
-    Based on the articles above, determine if the article is {names[0]} or {names[1]}.
+TASK
+___
+Based on the articles above, determine if the article is {names[0]} or {names[1]}.
 
-    Consider:
-    1. Which articles better aligns with the facts in the article?
-    2. Which of the articles is the most similar to the article, in style and content?"""
-        
+Consider:
+1. Which articles better aligns with the facts in the article?
+2. Which of the articles is the most similar to the article, in style and content?"""
+
     template_4 = f"""
-    Respond with:
-    - Classification: [FAKE/RELIABLE]. This should be "FAKE" if the article best matches the {names[0]} {noun}, and "RELIABLE" if the article best matches the {names[1]} {noun}.
-    - Confidence: [0.0-1.0]   This should be a number between 0 and 1 that represents the confidence in your classification.
-    - Reasoning: [Brief explanation of your decision]
+Respond with:
+- Classification: [FAKE/RELIABLE]. This should be "FAKE" if the article best matches the {names[0]} {noun}, and "RELIABLE" if the article best matches the {names[1]} {noun}.
+- Confidence: [0.0-1.0]   This should be a number between 0 and 1 that represents the confidence in your classification.
+- Reasoning: [Brief explanation of your decision]
 
-    Format your response exactly as:
-    Classification: [FAKE/RELIABLE]
-    Confidence: [0.0-1.0]
-    Reasoning: [Your explanation here]"""
-
+Format your response exactly as:
+Classification: [FAKE/RELIABLE]
+Confidence: [0.0-1.0]
+Reasoning: [Your explanation here]
+"""
     return template_1 + template_2 + template_3 + template_4
+
 
 def classify_article(
     llm: LocalLLM,
@@ -297,6 +297,3 @@ def classify_article_simple(
         **kwargs,
     )
     return result.prediction
-
-
-print(_generate_classification_template("type1_type2", 0))

@@ -159,6 +159,7 @@ def _format_evidence_bullets(chunks: List[EvidenceChunk], max_tokens: int = 300)
 
 # ----------------------------- public API -----------------------------
 
+
 def contrastive_summaries(
     llm: LocalLLM,
     query: Article,
@@ -193,15 +194,15 @@ def contrastive_summaries(
 
     logger.info("Generating fake evidence prompt...")
     prompt_fake = summary_user_template.format(
-        #q_title=q_title,
-        #q_body=q_body,
+        # q_title=q_title,
+        # q_body=q_body,
         evidence_bullets=_format_evidence_bullets(fake_evidence),
     )
 
     logger.info("Generating reliable evidence prompt...")
     prompt_reliable = summary_user_template.format(
-        #q_title=q_title,
-        #q_body=q_body,
+        # q_title=q_title,
+        # q_body=q_body,
         evidence_bullets=_format_evidence_bullets(reliable_evidence),
     )
 
@@ -214,8 +215,14 @@ def contrastive_summaries(
     logger.info(f"System: {summary_system}")
     logger.info(f"User: {prompt_reliable}")
 
-    msgs_fake = [{"role": "system", "content": summary_system}, {"role": "user", "content": prompt_fake}]
-    msgs_reliable = [{"role": "system", "content": summary_system}, {"role": "user", "content": prompt_reliable}]
+    msgs_fake = [
+        {"role": "system", "content": summary_system},
+        {"role": "user", "content": prompt_fake},
+    ]
+    msgs_reliable = [
+        {"role": "system", "content": summary_system},
+        {"role": "user", "content": prompt_reliable},
+    ]
 
     logger.info(f"Calling LLM for fake summary (temperature={temperature}, max_tokens={max_tokens})...")
     resp_fake = llm.chat(msgs_fake, temperature=temperature, max_tokens=max_tokens)

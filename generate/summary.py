@@ -81,21 +81,65 @@ def _trim_tokens(s: str, max_tokens: int) -> str:
 
 # ----------------------------- prompting -----------------------------
 # TODO test cases of [General summary, Fake news detection summary, etc]
-SUMMARY_SYSTEM = (
-    "You are a careful fact-focused assistant. Summarize EVIDENCE."
-)
+SUMMARY_SYSTEMS = [
+    (
+        "You are a careful fact-focused assistant. Summarize ARTICLES."
+    ),
+    (
+        "You are a careful fact-focused assistant. Summarize ARTICLES."
+    ),
+    (
+        """You are an expert journalist and fact-checker. Your task is to write a comprehensive, 
+        well-structured news article based on the provided ARTICLES. Create an article that 
+        accurately represents the facts from the ARTICLES while maintaining journalistic 
+        standards and objectivity."""
+    )
+]
 
-SUMMARY_USER_TEMPLATE = (
-    """
-EVIDENCE
+SUMMARY_USER_TEMPLATES = [
+    (
+        """
+ARTICLES
 -----------------------
 {evidence_bullets}
 
 TASK
 ----
-Write a concise fact summary explaining of the EVIDENCE. Limit to 300 tokens.
+Write a concise summary focusing on the facts of the ARTICLES. 
+Limit to 300 tokens.
 """
-)
+    ),
+    (
+        """
+ARTICLES
+-----------------------
+{evidence_bullets}
+
+TASK
+----
+Write a concise summary focusing on the facts of the ARTICLES. 
+The summary will be used to classify new articles as fake or reliable based on their closeness to the summary. 
+Avoid direct mentions of which group of articles you are summarizing (e.g. fake or reliable).
+Limit to 300 tokens.
+"""
+    ),
+    (
+        """
+ARTICLES
+-----------------
+{evidence_bullets}
+
+TASK
+----
+Write a new article based on the facts of the ARTICLES. 
+Avoid direct mentions of the articles you are using.
+Limit to 300 tokens.
+"""
+    )
+]
+
+SUMMARY_SYSTEM = SUMMARY_SYSTEMS[0]
+SUMMARY_USER_TEMPLATE = SUMMARY_USER_TEMPLATES[0]
 
 
 def _format_evidence_bullets(chunks: List[EvidenceChunk], max_tokens: int = 300) -> str:

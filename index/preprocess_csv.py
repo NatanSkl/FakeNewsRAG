@@ -79,7 +79,7 @@ def preprocess(csv_path, output_path):
             del chunk, new_chunk
 
 
-def balanced_sample(csv_path, output_path, max_rows):
+def balanced_sample(csv_path, output_path, output_path_fake, output_path_reliable, max_rows):
     df = pd.read_csv(csv_path, engine="python")
     counts = df["label"].value_counts(sort=False)
     rows_per_label = max_rows // len(VALID_LABELS)
@@ -88,14 +88,25 @@ def balanced_sample(csv_path, output_path, max_rows):
         n=rows_per_label, random_state=SEED
     )
     sampled = sampled.sample(frac=1, random_state=SEED).reset_index(drop=True)
+
+    sampled_fake = sampled[sampled['label'] == 'fake']
+    sampled_reliable = sampled[sampled['label'] == 'reliable']
+    sampled_fake.to_csv(output_path_fake)
+    sampled_reliable.to_csv(output_path_reliable)
     sampled.to_csv(output_path, index=False)
     return sampled
 
 
-def split(csv_path, output_dir, test_split, validation_split):
-    train_out = os.path.join(output_dir, "train.csv")
-    test_out = os.path.join(output_dir, "test.csv")
-    val_out = os.path.join(output_dir, "val.csv")
+def split(csv_path, output_dir, test_split, validation_split, split_label=None):
+    if split_label is None:
+        train_out = os.path.join(output_dir, "train.csv")
+        test_out = os.path.join(output_dir, "test.csv")
+        val_out = os.path.join(output_dir, "val.csv")
+    else:
+        train_out = os.path.join(output_dir, f"train_{split_label}.csv")
+        test_out = os.path.join(output_dir, f"test_{split_label}.csv")
+        val_out = os.path.join(output_dir, f"val_{split_label}.csv")
+
     if os.path.isfile(train_out) or os.path.isfile(test_out) or os.path.isfile(val_out):
         return
     with pd.read_csv(
@@ -131,11 +142,15 @@ def main():
     args = parse_args()
     filepath = os.path.join(args.out_dir, "news_preprocessed.csv")
     filepath_2 = os.path.join(args.out_dir, "news_balanced.csv")
+    filepath_2_fake = os.path.join(args.out_dir, "news_balanced_fake.csv")
+    filepath_2_reliable = os.path.join(args.out_dir, "news_balanced_reliable.csv")
     if not args.skip_preprocessing:
         preprocess(args.input, filepath)
     if not args.skip_balancing:
-        balanced_sample(filepath, filepath_2, args.balanced_size)
+        balanced_sample(filepath, filepath_2, filepath_2_fake, filepath_2_reliable, args.balanced_size)
     split(filepath_2, args.out_dir, args.test_split, args.val_split)
+    split(filepath_2_fake, args.out_dir, args.test_split, args.val_split, 'fake')
+    split(filepath_2_reliable, args.out_dir, args.test_split, args.val_split, 'reliable')
 
 
 if __name__ == "__main__":

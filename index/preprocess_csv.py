@@ -79,7 +79,9 @@ def preprocess(csv_path, output_path):
             del chunk, new_chunk
 
 
-def balanced_sample(csv_path, output_path, output_path_fake, output_path_reliable, max_rows):
+def balanced_sample(
+    csv_path, output_path, output_path_fake, output_path_reliable, max_rows
+):
     df = pd.read_csv(csv_path, engine="python")
     counts = df["label"].value_counts(sort=False)
     rows_per_label = max_rows // len(VALID_LABELS)
@@ -89,10 +91,10 @@ def balanced_sample(csv_path, output_path, output_path_fake, output_path_reliabl
     )
     sampled = sampled.sample(frac=1, random_state=SEED).reset_index(drop=True)
 
-    sampled_fake = sampled[sampled['label'] == 'fake']
-    sampled_reliable = sampled[sampled['label'] == 'reliable']
-    sampled_fake.to_csv(output_path_fake)
-    sampled_reliable.to_csv(output_path_reliable)
+    sampled_fake = sampled[sampled["label"] == "fake"]
+    sampled_reliable = sampled[sampled["label"] == "reliable"]
+    sampled_fake.to_csv(output_path_fake, index=False)
+    sampled_reliable.to_csv(output_path_reliable, index=False)
     sampled.to_csv(output_path, index=False)
     return sampled
 
@@ -147,10 +149,18 @@ def main():
     if not args.skip_preprocessing:
         preprocess(args.input, filepath)
     if not args.skip_balancing:
-        balanced_sample(filepath, filepath_2, filepath_2_fake, filepath_2_reliable, args.balanced_size)
+        balanced_sample(
+            filepath,
+            filepath_2,
+            filepath_2_fake,
+            filepath_2_reliable,
+            args.balanced_size,
+        )
     split(filepath_2, args.out_dir, args.test_split, args.val_split)
-    split(filepath_2_fake, args.out_dir, args.test_split, args.val_split, 'fake')
-    split(filepath_2_reliable, args.out_dir, args.test_split, args.val_split, 'reliable')
+    split(filepath_2_fake, args.out_dir, args.test_split, args.val_split, "fake")
+    split(
+        filepath_2_reliable, args.out_dir, args.test_split, args.val_split, "reliable"
+    )
 
 
 if __name__ == "__main__":

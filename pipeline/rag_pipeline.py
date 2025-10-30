@@ -47,43 +47,19 @@ def _get_timestamp() -> str:
     return dt.datetime.now().strftime("%H:%M")
 
 
-def classify_article_rag_dummy(
-    article_title: str,
-    article_content: str,
-    store,
-    ce_model = None,
-    diversify_type: str = None,
-    *,
-    llm: LocalLLM,
-    retrieval_config: RetrievalConfig | None = None,
-    verbose: bool = False
-) -> RAGOutput:
-    classification = ClassificationResult(
-        prediction="fake",
-        confidence=1.0,
-        reasoning="<dummy reasoning>",
-        raw_response="<dummy raw response>"
-    )
-    return RAGOutput(
-        classification=classification,
-        fake_summary="<dummy fake summary>  ",
-        reliable_summary="<dummy reliable summary>",
-        fake_evidence="<dummy fake evidence>",
-        reliable_evidence="<dummy reliable evidence>",
-        retrieval_config=None
-    )
-
-
 def classify_article_rag(
     article_title: str,
     article_content: str,
-    store,
+    stores: Dict[str, Any],
     *,
     ce_model = None,
     diversify_type: str = None,
     llm: LocalLLM,
     retrieval_config: RetrievalConfig | None = None,
-    verbose: bool = False
+    verbose: bool = False,
+    prompt_type: int = 0,
+    naming_convention: str = "fake_reliable",
+    debug_mode: bool = False
 ) -> RAGOutput:
     """
     Full RAG pipeline for article classification.
@@ -91,18 +67,21 @@ def classify_article_rag(
     Args:
         article_title: Title of the article to classify
         article_content: Content of the article to classify
-        store: Pre-loaded store object containing index, model, and metadata
+        stores: Dictionary of pre-loaded Store objects with keys "fake" and "reliable"
         ce_model: Cross-encoder model for reranking (None to skip)
         diversify_type: Diversity method ("mmr" or None to skip)
         llm: Language model for summarization and classification
         retrieval_config: Configuration for retrieval (uses defaults if None)
         verbose: Whether to print verbose output with timestamps
+        prompt_type: Type of prompt to use for summarization and classification
+        naming_convention: Naming convention for classification labels
+        debug_mode: If True, returns debug information including prompts
     
     Returns:
         RAGOutput with classification results and evidence
     """
     logger.info(f"[RAG Pipeline] Starting classification for: '{article_title[:50]}...'")
-    logger.info("[RAG Pipeline] Using pre-loaded store")
+    logger.info("[RAG Pipeline] Using pre-loaded stores")
     
     # Use default config if none provided
     if retrieval_config is None:
@@ -117,7 +96,7 @@ def classify_article_rag(
     # Retrieve evidence for both labels
     logger.info("[RAG Pipeline] Retrieving fake evidence...")
     fake_hits = retrieve_evidence(
-        store, 
+        stores, 
         article_content, 
         "fake", 
         retrieval_config
@@ -126,7 +105,7 @@ def classify_article_rag(
     
     logger.info("[RAG Pipeline] Retrieving reliable evidence...")
     credible_hits = retrieve_evidence(
-        store, 
+        stores, 
         article_content, 
         "reliable", 
         retrieval_config
@@ -167,7 +146,7 @@ def classify_article_rag(
     # Generate contrastive summaries
     logger.info("[RAG Pipeline] Generating contrastive summaries...")
     summaries = contrastive_summaries(
-        llm, article, fake_evidence, credible_evidence
+        llm, article, fake_evidence, credible_evidence, promt_type=prompt_type, return_debug=debug_mode
     )
     fake_summary = summaries["fake_summary"]
     reliable_summary = summaries["reliable_summary"]
@@ -180,7 +159,10 @@ def classify_article_rag(
         article_title, 
         article_content, 
         fake_summary, 
-        reliable_summary
+        reliable_summary,
+        naming_convention=naming_convention,
+        promt_type=prompt_type,
+        return_debug=debug_mode
     )
     logger.info(f"[RAG Pipeline] Classification completed: {classification.prediction} (confidence: {classification.confidence:.3f})")
     logger.info("[RAG Pipeline] RAG pipeline completed successfully!")
@@ -213,15 +195,17 @@ def main():
     else:
         llm = Mistral(args.llm_url)
     
-    # Load store
-    logger.info("Loading store...")
-    store = load_store(args.store, verbose=True)
+    # Load stores
+    logger.info("Loading stores...")
+    fake_store = load_store(args.store + "_fake", verbose=True)
+    reliable_store = load_store(args.store + "_reliable", verbose=True)
+    stores = {"fake": fake_store, "reliable": reliable_store}
     
     # Run RAG pipeline
     result = classify_article_rag(
         article_title=args.title,
         article_content=args.content,
-        store=store,
+        stores=stores,
         llm=llm
     )
     

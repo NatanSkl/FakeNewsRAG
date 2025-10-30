@@ -68,13 +68,15 @@ def test_rag_pipeline(
         print(f"[{datetime.now().strftime('%H:%M')}] Error initializing LLM: {e}")
         return None
     
-    # Load store
-    print(f"[{datetime.now().strftime('%H:%M')}] Loading store...")
+    # Load stores
+    print(f"[{datetime.now().strftime('%H:%M')}] Loading stores...")
     try:
-        store = load_store(store_path, verbose=verbose)
-        print(f"[{datetime.now().strftime('%H:%M')}] Store loaded successfully")
+        fake_store = load_store(store_path + "_fake", verbose=verbose)
+        reliable_store = load_store(store_path + "_reliable", verbose=verbose)
+        stores = {"fake": fake_store, "reliable": reliable_store}
+        print(f"[{datetime.now().strftime('%H:%M')}] Stores loaded successfully")
     except Exception as e:
-        print(f"[{datetime.now().strftime('%H:%M')}] Error loading store: {e}")
+        print(f"[{datetime.now().strftime('%H:%M')}] Error loading stores: {e}")
         return None
 
     from sentence_transformers.cross_encoder import CrossEncoder
@@ -102,7 +104,7 @@ def test_rag_pipeline(
         result = classify_article_rag(
             article_title=article_title,
             article_content=article_content,
-            store=store,
+            stores=stores,
             llm=llm,
             retrieval_config=retrieval_config,
             verbose=verbose
@@ -204,7 +206,7 @@ def main():
     parser = argparse.ArgumentParser(description="Test the RAG pipeline")
     parser.add_argument("--title", help="Article title to test")
     parser.add_argument("--content", help="Article content to test")
-    parser.add_argument("--store", default="../index/store_slice", help="Path to index store")
+    parser.add_argument("--store", default="/StudentData/index", help="Path to index store")
     parser.add_argument("--llm-url", default="http://127.0.0.1:8010", help="LLM server URL")
     parser.add_argument("--llm-type", choices=["llama", "mistral"], default="llama", help="LLM type")
     parser.add_argument("--test", choices=["single", "multiple"], default="single", help="Test type")

@@ -47,5 +47,7 @@ markdown>=3.4.0
 # Development and testing
 pytest>=7.0.0
 
+dotenv
+
 
 

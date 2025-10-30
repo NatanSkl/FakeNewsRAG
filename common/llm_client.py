@@ -17,8 +17,12 @@ import time
 import json
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Any
+from dotenv import load_dotenv
 
 import requests
+
+# Load environment variables
+load_dotenv('params.env')
 
 
 @dataclass
@@ -48,9 +52,9 @@ class LocalLLM:
     def chat(
         self,
         messages: List[Dict[str, str]],
-        temperature: float = 0.2,
+        temperature: float = None,
         max_tokens: int = 512,
-        top_p: float = 0.95,
+        top_p: float = 1.0,
         stop: Optional[List[str]] = None,
         extra: Optional[Dict[str, Any]] = None,
     ) -> ChatResponse:
@@ -61,6 +65,10 @@ class LocalLLM:
             temperature, max_tokens, top_p, stop: standard decoding params
             extra: forwarded to the server body (e.g., logprobs, seed)
         """
+        # Use environment variable if temperature is not provided
+        if temperature is None:
+            temperature = float(os.getenv('TEMPERATURE', '0.0'))
+        
         body = {
             "model": self.model,
             "messages": messages,

@@ -12,7 +12,7 @@ from typing import List, Dict, Any
 from retrieval_v3 import retrieve_evidence, load_store, RetrievalConfig
 
 
-def test_retrieve_evidence_basic(store, verbose: bool = True):
+def test_retrieve_evidence_basic(stores, verbose: bool = True):
     """Test basic retrieve_evidence functionality."""
     print("\n" + "="*60)
     print("TEST: Basic retrieve_evidence functionality")
@@ -26,7 +26,7 @@ def test_retrieve_evidence_basic(store, verbose: bool = True):
         print("\n--- Test 1: Basic retrieval (no reranking, no diversification) ---")
         config = RetrievalConfig(k=10, ce_model=None, ce_model_name=None, diversity_type=None, verbose=verbose)
         results = retrieve_evidence(
-            store=store,
+            stores=stores,
             article_text=article_text,
             label_name="reliable",
             retrieval_config=config
@@ -35,13 +35,13 @@ def test_retrieve_evidence_basic(store, verbose: bool = True):
         print(f"Retrieved {len(results)} evidence items")
         for i, result in enumerate(results, 1):
             print(f"  [{i}] db_id: {result['db_id']}, score: {result['score']:.4f}, label: {result['label']}")
-            print(f"      content: {result['content'][:80]}...")
+            print(f"      content: {result['content'][:180]}...")
         
         # Test 2: With MMR diversification
         print("\n--- Test 2: With MMR diversification ---")
         config_mmr = RetrievalConfig(k=10, ce_model=None, ce_model_name=None, diversity_type="mmr", verbose=verbose)
         results_mmr = retrieve_evidence(
-            store=store,
+            stores=stores,
             article_text=article_text,
             label_name="reliable",
             retrieval_config=config_mmr
@@ -56,7 +56,7 @@ def test_retrieve_evidence_basic(store, verbose: bool = True):
         print("\n--- Test 3: Filtering by 'fake' label ---")
         config_fake = RetrievalConfig(k=10, ce_model=None, ce_model_name=None, diversity_type=None, verbose=verbose)
         results_fake = retrieve_evidence(
-            store=store,
+            stores=stores,
             article_text=article_text,
             label_name="fake",
             retrieval_config=config_fake
@@ -76,7 +76,7 @@ def test_retrieve_evidence_basic(store, verbose: bool = True):
         return False
 
 
-def test_retrieve_evidence_with_cross_encoder(store, verbose: bool = True):
+def test_retrieve_evidence_with_cross_encoder(stores, verbose: bool = True):
     """Test retrieve_evidence with cross-encoder reranking."""
     print("\n" + "="*60)
     print("TEST: retrieve_evidence with cross-encoder reranking")
@@ -95,7 +95,7 @@ def test_retrieve_evidence_with_cross_encoder(store, verbose: bool = True):
         print("\n--- Test with cross-encoder reranking using ce_model_name ---")
         config_ce = RetrievalConfig(k=10, ce_model=ce_model, ce_model_name="cross-encoder/ms-marco-MiniLM-L-6-v2", diversity_type=None, verbose=verbose)
         results = retrieve_evidence(
-            store=store,
+            stores=stores,
             article_text=article_text,
             label_name="reliable",
             retrieval_config=config_ce
@@ -116,7 +116,7 @@ def test_retrieve_evidence_with_cross_encoder(store, verbose: bool = True):
         return True  # Don't fail the test since this is expected
 
 
-def test_retrieve_evidence_edge_cases(store, verbose: bool = False):
+def test_retrieve_evidence_edge_cases(stores, verbose: bool = False):
     """Test retrieve_evidence with edge cases."""
     print("\n" + "="*60)
     print("TEST: retrieve_evidence edge cases")
@@ -127,7 +127,7 @@ def test_retrieve_evidence_edge_cases(store, verbose: bool = False):
     try:
         config_empty = RetrievalConfig(k=10, ce_model=None, ce_model_name=None, diversity_type=None, verbose=verbose)
         results = retrieve_evidence(
-            store=store,
+            stores=stores,
             article_text="",
             label_name="reliable",
             retrieval_config=config_empty
@@ -141,7 +141,7 @@ def test_retrieve_evidence_edge_cases(store, verbose: bool = False):
     try:
         config_nonexistent = RetrievalConfig(k=10, ce_model=None, ce_model_name=None, diversity_type=None, verbose=verbose)
         results = retrieve_evidence(
-            store=store,
+            stores=stores,
             article_text="test article",
             label_name="nonexistent",
             retrieval_config=config_nonexistent
@@ -155,7 +155,7 @@ def test_retrieve_evidence_edge_cases(store, verbose: bool = False):
     try:
         config_short = RetrievalConfig(k=10, ce_model=None, ce_model_name=None, diversity_type=None, verbose=verbose)
         results = retrieve_evidence(
-            store=store,
+            stores=stores,
             article_text="AI",
             label_name="reliable",
             retrieval_config=config_short
@@ -181,15 +181,17 @@ def main():
     print("="*60)
     
     try:
-        # Load store
-        print("Loading store...")
-        store = load_store(args.store_dir, verbose=not args.quiet, ce_model_name="cross-encoder/ms-marco-MiniLM-L-6-v2")
-        print(f"Store loaded successfully with {store.index.ntotal} vectors")
+        # Load stores
+        print("Loading stores...")
+        fake_store = load_store(args.store_dir + "_fake", verbose=not args.quiet)
+        reliable_store = load_store(args.store_dir + "_reliable", verbose=not args.quiet)
+        stores = {"fake": fake_store, "reliable": reliable_store}
+        print(f"Stores loaded successfully")
         
         verbose = True
         
         if args.edge_cases:
-            success = test_retrieve_evidence_edge_cases(store, verbose)
+            success = test_retrieve_evidence_edge_cases(stores, verbose)
             if success:
                 print("\n" + "="*60)
                 print("🎉 Edge case tests completed successfully!")
@@ -199,7 +201,7 @@ def main():
             return success
             
         elif args.cross_encoder:
-            success = test_retrieve_evidence_with_cross_encoder(store, verbose)
+            success = test_retrieve_evidence_with_cross_encoder(stores, verbose)
             if success:
                 print("\n" + "="*60)
                 print("🎉 Cross-encoder tests completed successfully!")
@@ -210,8 +212,8 @@ def main():
             
         else:
             # Test basic functionality
-            success = test_retrieve_evidence_basic(store, verbose)
-            edge_success = test_retrieve_evidence_edge_cases(store, verbose)
+            success = test_retrieve_evidence_basic(stores, verbose)
+            edge_success = test_retrieve_evidence_edge_cases(stores, verbose)
             
             all_success = success and edge_success
             

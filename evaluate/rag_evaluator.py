@@ -31,7 +31,7 @@ class RAGEvaluator:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         self.llm = None
-        self.store = None
+        self.stores = None
         
         print("="*80)
         print("RAG EVALUATION SYSTEM")
@@ -60,13 +60,15 @@ class RAGEvaluator:
             print(f"ERROR loading Llama: {e}")
             raise
         
-        # Load store
-        print("Step 2/2: Loading vector store...")
+        # Load stores
+        print("Step 2/2: Loading vector stores...")
         try:
-            self.store = load_store(self.store_path, verbose=False)
-            print(f"Store loaded successfully: {self.store.index.ntotal} vectors")
+            fake_store = load_store(self.store_path + "_fake", verbose=False)
+            reliable_store = load_store(self.store_path + "_reliable", verbose=False)
+            self.stores = {"fake": fake_store, "reliable": reliable_store}
+            print(f"Stores loaded successfully")
         except Exception as e:
-            print(f"ERROR loading store: {e}")
+            print(f"ERROR loading stores: {e}")
             raise
         
         print("\nInitialization complete!")
@@ -95,7 +97,7 @@ class RAGEvaluator:
                 rag_result = classify_article_rag(
                     article_title=article['title'],
                     article_content=article['content'],
-                    store=self.store,
+                    stores=self.stores,
                     llm=self.llm,
                     retrieval_config=retrieval_config,
                     verbose=False

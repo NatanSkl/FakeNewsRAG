@@ -330,7 +330,7 @@ def filter_label(results: List[Dict[str, Any]], label: str) -> List[Dict[str, An
     return filtered
 
 
-def retrieve_evidence(store: Store,
+def retrieve_evidence(stores: Dict[str, Store],
                       article_text: str,
                       label_name: str,
                       retrieval_config: RetrievalConfig,
@@ -339,9 +339,9 @@ def retrieve_evidence(store: Store,
     Retrieve evidence for an article with optional cross-encoder reranking and diversity.
     
     Args:
-        store: Store object containing index, model, and metadata
+        stores: Dictionary of Store objects with keys "fake" and "reliable"
         article_text: Article text to find evidence for
-        label_name: Label to filter by (e.g., "real", "fake")
+        label_name: Label to select which store to use (e.g., "fake", "reliable")
         retrieval_config: RetrievalConfig object containing k, ce_model, diversity_type, and verbose settings
         minimum_k: Minimum number of results to retrieve before filtering
         
@@ -351,11 +351,18 @@ def retrieve_evidence(store: Store,
     logger.info(f"Starting evidence retrieval for label: {label_name}")
     logger.info(f"Article text: {article_text[:100]}...")
     
+    # Select the appropriate store based on label_name
+    if label_name not in stores:
+        raise ValueError(f"Label '{label_name}' not found in stores. Available: {list(stores.keys())}")
+    
+    store = stores[label_name]
+    logger.info(f"Selected store for label '{label_name}'")
+    
     # Step 1: Perform initial query
     logger.info("Step 1: Performing initial query...")
     
-    # Use a larger k for initial retrieval to account for filtering and diversification
-    initial_k = max(retrieval_config.k * 3, minimum_k)  # Retrieve 3x more than needed, minimum minimum_k
+    # Use a larger k for initial retrieval to account for diversification
+    initial_k = max(retrieval_config.k * 2, minimum_k)  # Retrieve 2x more than needed, minimum minimum_k
     results = query_once(store, article_text, k=initial_k)
     
     logger.info(f"Retrieved {len(results)} initial results")
@@ -367,15 +374,8 @@ def retrieve_evidence(store: Store,
     
     logger.info(f"After deduplication: {len(results)} results")
     
-    # Step 3: Filter by label
-    logger.info(f"Step 3: Filtering by label '{label_name}'...")
-    
-    results = filter_label(results, label_name)
-    
-    logger.info(f"After label filtering: {len(results)} results")
-    
     if not results:
-        logger.info("No results found after filtering, returning empty list")
+        logger.info("No results found, returning empty list")
         return []
 
     ce_model = retrieval_config.ce_model
@@ -391,9 +391,9 @@ def retrieve_evidence(store: Store,
             logger.warning(f"Failed to load cross-encoder model: {e}")
             ce_model = None
     
-    # Step 4: Cross-encoder reranking (if model provided)
+    # Step 3: Cross-encoder reranking (if model provided)
     if ce_model is not None:
-        logger.info("Step 4: Applying cross-encoder reranking...")
+        logger.info("Step 3: Applying cross-encoder reranking...")
         
         try:
             results = cross_encoder_rerank(
@@ -411,9 +411,9 @@ def retrieve_evidence(store: Store,
             logger.warning(f"Cross-encoder reranking failed: {e}")
             # Continue without reranking if it fails
     
-    # Step 5: Diversity (if requested)
+    # Step 4: Diversity (if requested)
     if retrieval_config.diversity_type is not None and retrieval_config.diversity_type.lower() == "mmr":
-        logger.info("Step 5: Applying MMR diversification...")
+        logger.info("Step 4: Applying MMR diversification...")
         
         try:
             results = mmr_diversify(
@@ -431,8 +431,8 @@ def retrieve_evidence(store: Store,
             logger.warning(f"MMR diversification failed: {e}")
             # Continue without diversification if it fails
     
-    # Step 6: Add full content to each result
-    logger.info("Step 6: Adding full content to results...")
+    # Step 5: Add full content to each result
+    logger.info("Step 5: Adding full content to results...")
     
     # Get top k results first
     final_results = results[:retrieval_config.k]
@@ -457,7 +457,7 @@ def retrieve_evidence(store: Store,
     
     logger.info(f"Added full content to {len(final_results)} results")
     
-    # Step 7: Return top k results
+    # Step 6: Return top k results
     logger.info(f"Final results: {len(final_results)} evidence items")
     logger.info("Evidence retrieval completed successfully!")
     
@@ -760,6 +760,10 @@ def query_once(store: Store, query: str, k: int = 10, nprobe: int = 16):
         
         # Get data from vector_id using the extracted function
         data = get_data_from_vector_id(store, int(vid))
+        
+        # Skip if data is None (vector_id not found in mappings)
+        if data is None:
+            continue
             
         results.append({
             "score": float(d),  # inner product; higher is better

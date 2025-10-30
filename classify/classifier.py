@@ -42,6 +42,7 @@ class ClassificationResult:
     confidence: float  # confidence score between 0 and 1
     reasoning: str  # explanation for the classification
     raw_response: str  # raw LLM response
+    classification_prompt: str = ""  # debug field for the prompt used
 
 
 # TODO test cases of different personalities / instructions / level of detail
@@ -159,16 +160,23 @@ Reasoning: [Your explanation here]
     return template_1 + template_2 + template_3 + template_4
 
 
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv('params.env')
+
 def classify_article(
     llm: LocalLLM,
     article_title: str,
     article_content: str,
     fake_summary: str,
     reliable_summary: str,
-    temperature: float = 0.1,
+    temperature: float = None,
     max_tokens: int = 300,
     naming_convention: str = "fake_reliable",
     promt_type: int = 0,
+    return_debug: bool = False,
 ) -> ClassificationResult:
     """
     Classify an article as fake or reliable based on contrastive summaries.
@@ -179,13 +187,18 @@ def classify_article(
         article_content: Content/text of the article to classify
         fake_summary: Summary based on fake news evidence
         reliable_summary: Summary based on reliable news evidence
-        temperature: LLM temperature for generation (lower = more deterministic)
+        temperature: LLM temperature for generation (if None, uses TEMPERATURE env variable)
         max_tokens: Maximum tokens for the response
         naming_convention: Naming convention for summaries ("fake_reliable", "type1_type2", "fake_reliable_article", "type1_type2_article")
         promt_type: Prompt type (0 = general persona, 1 = persona with background information, 2 = new article)
+        return_debug: If True, includes the classification prompt in the result
     Returns:
         ClassificationResult with prediction, confidence, reasoning, and raw response
     """
+    # Use environment variable if temperature is not provided
+    if temperature is None:
+        temperature = float(os.getenv('TEMPERATURE', '0.0'))
+    
     classification_system = CLASSIFICATION_SYSTEMS[promt_type]
     # Apply token limits
     article_content_trimmed = _trim_tokens(article_content, 600)
@@ -215,7 +228,14 @@ def classify_article(
     )
 
     # Parse the response
-    return _parse_classification_response(response.text)
+    result = _parse_classification_response(response.text)
+    
+    # Add debug information if requested
+    if return_debug:
+        classification_prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+        result.classification_prompt = classification_prompt
+    
+    return result
 
 
 def _parse_classification_response(response_text: str) -> ClassificationResult:

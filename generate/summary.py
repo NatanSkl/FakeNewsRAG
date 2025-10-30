@@ -160,14 +160,21 @@ def _format_evidence_bullets(chunks: List[EvidenceChunk], max_tokens: int = 300)
 # ----------------------------- public API -----------------------------
 
 
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv('params.env')
+
 def contrastive_summaries(
     llm: LocalLLM,
     query: Article,
     fake_evidence: List[EvidenceChunk],
     reliable_evidence: List[EvidenceChunk],
-    temperature: float = 0.2,
+    temperature: float = None,
     max_tokens: int = 600,
     promt_type: int = 0,
+    return_debug: bool = False,
 ) -> Dict[str, str]:
     """Produce two summaries conditioned on the same query with different evidence sets.
 
@@ -176,13 +183,19 @@ def contrastive_summaries(
         query: Article to summarize in relation to
         fake_evidence: List of EvidenceChunk objects labeled as "fake"
         reliable_evidence: List of EvidenceChunk objects labeled as "reliable"
-        temperature: LLM temperature for generation
+        temperature: LLM temperature for generation (if None, uses TEMPERATURE env variable)
         max_tokens: Maximum tokens for each summary
         promt_type: Prompt type (0 = general persona, 1 = persona with background information, 2 = new article)
+        return_debug: If True, returns prompts in addition to summaries
 
     Returns:
-        Dict with keys "fake_summary" and "reliable_summary" containing the generated summaries
+        Dict with keys "fake_summary" and "reliable_summary" containing the generated summaries.
+        If return_debug=True, also includes "fake_prompt" and "reliable_prompt" keys.
     """
+    # Use environment variable if temperature is not provided
+    if temperature is None:
+        temperature = float(os.getenv('TEMPERATURE', '0.0'))
+    
     summary_system = SUMMARY_SYSTEMS[promt_type]
     summary_user_template = SUMMARY_USER_TEMPLATES[promt_type]
 
@@ -233,4 +246,16 @@ def contrastive_summaries(
     logger.info(f"Reliable summary generated: {len(resp_reliable.text)} characters")
 
     logger.info("Contrastive summaries generation completed successfully!")
-    return {"fake_summary": resp_fake.text.strip(), "reliable_summary": resp_reliable.text.strip()}
+    
+    result = {"fake_summary": resp_fake.text.strip(), "reliable_summary": resp_reliable.text.strip()}
+    
+    if return_debug:
+        # Convert messages to strings for debug output
+        fake_prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in msgs_fake])
+        reliable_prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in msgs_reliable])
+        result.update({
+            "fake_prompt": fake_prompt,
+            "reliable_prompt": reliable_prompt
+        })
+    
+    return result

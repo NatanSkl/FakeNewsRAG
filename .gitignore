@@ -80,5 +80,7 @@ index/data/
 index/store_slice
 models/
 
-experiments/
+experiments*/
 metrics/
+
+data/

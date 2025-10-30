@@ -157,26 +157,30 @@ def run_rag_retrieval_test():
     try:
         from retrieval import load_store, retrieve_evidence, RetrievalConfig
         
-        # Try to find store
-        store_paths = [
-            "/StudentData/slice_backup02_10",
+        # Try to find stores
+        store_base_paths = [
+            "/StudentData/index",
             "index/store",
             "mini_index/store"
         ]
         
-        store = None
-        for path in store_paths:
-            if Path(path).exists():
-                print(f"Loading store from: {path}")
+        stores = None
+        for base_path in store_base_paths:
+            fake_path = base_path + "_fake"
+            reliable_path = base_path + "_reliable"
+            if Path(fake_path).exists() and Path(reliable_path).exists():
+                print(f"Loading stores from: {base_path}_fake and {base_path}_reliable")
                 try:
-                    store = load_store(path, verbose=False)
-                    print(f"Store loaded: {store.index.ntotal} vectors")
+                    fake_store = load_store(fake_path, verbose=False)
+                    reliable_store = load_store(reliable_path, verbose=False)
+                    stores = {"fake": fake_store, "reliable": reliable_store}
+                    print(f"Stores loaded successfully")
                     break
                 except:
                     continue
         
-        if store is None:
-            print("No valid store found for RAG testing")
+        if stores is None:
+            print("No valid stores found for RAG testing")
             return False
         
         # Test retrieval
@@ -185,23 +189,17 @@ def run_rag_retrieval_test():
         config = RetrievalConfig(k=5, ce_model=None, diversity_type=None, verbose=False)
         
         fake_hits = retrieve_evidence(
-            store,
+            stores,
             test_query,
             "fake",
-            None,
-            None,
-            config.k,
-            False
+            config
         )
         
         reliable_hits = retrieve_evidence(
-            store,
+            stores,
             test_query,
             "reliable",
-            None,
-            None,
-            config.k,
-            False
+            config
         )
         
         print(f"  Query: {test_query}")

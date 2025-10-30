@@ -7,9 +7,14 @@ Executes LLM baseline classification on CSV files and saves results.
 import time
 import pandas as pd
 import tiktoken
+import os
 from pathlib import Path
 from typing import List, Dict, Tuple
 from dataclasses import dataclass, asdict
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv('params.env')
 
 # Add parent to path
 import sys
@@ -87,7 +92,7 @@ class OnlyLLMExecutor:
         print("Testing LLM server connection...")
         try:
             test_messages = [{"role": "user", "content": "Say 'test'"}]
-            test_response = self.llm.chat(messages=test_messages, max_tokens=5, temperature=0.1)
+            test_response = self.llm.chat(messages=test_messages, max_tokens=5)
             print(f"Connection test successful: {test_response.text.strip()}")
         except Exception as e:
             print(f"ERROR: LLM server connection test failed: {e}")
@@ -187,8 +192,7 @@ Explanation: [Brief explanation of your reasoning]"""
             
             response = self.llm.chat(
                 messages=messages,
-                max_tokens=100,  # Increased for explanation
-                temperature=0.1
+                max_tokens=100  # Increased for explanation
             )
             
             response_text = response.text.strip()

@@ -195,7 +195,7 @@ def test_contrastive_summaries_real_llm_title_similarity():
     ev_fake = backfill("fake", ev_fake)
     ev_reliable = backfill("reliable", ev_reliable)
 
-    out = contrastive_summaries(llm, query, ev_fake, ev_reliable, temperature=0.2, max_tokens=400)
+    out = contrastive_summaries(llm, query, ev_fake, ev_reliable, temperature=0.0, max_tokens=400)
 
     # minimal assertions: non-empty, somewhat long, and different strings
     assert isinstance(out.get("fake_summary"), str) and len(out["fake_summary"]) > 40
@@ -332,7 +332,7 @@ def test_static_data_summary():
         query=query,
         fake_evidence=fake_evidence,
         reliable_evidence=reliable_evidence,
-        temperature=0.2,
+        temperature=0.0,
         max_tokens=400
     )
     

@@ -47,6 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", required=True)
     parser.add_argument("--out-dir", default="data")
     parser.add_argument("--bm25-out", type=str, default="bm25.pkl")
+    parser.add_argument("--build-bm25", action="store_true", help="Build BM25 index (disabled by default)")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--checkpoint-every", type=int, default=2e5)
 
@@ -81,7 +82,7 @@ def parse_args() -> argparse.Namespace:
 
     # IVF / PQ / HNSW parameters
     parser.add_argument(
-        "--train-sample", type=int, default=7.5e4
+        "--train-sample", type=int, default=3.75e4
     )  # sample size for training
     parser.add_argument("--nlist", type=int, default=1024)  # IVF: number of centroids
     parser.add_argument("--nprobe", type=int, default=16)  # IVF: search probes
@@ -215,6 +216,8 @@ def infer_dim(args: argparse.Namespace, model: SentenceTransformer) -> int:
     ):
         logging.debug(f"Processing chunk for dimension inference with {len(df)} rows")
         utils.validate_columns(df.columns, COLUMNS)
+        # Drop label column and NaN values (same as in add_vectors_streaming)
+        df = df[["id", "title", "content"]].dropna()
         texts = (df["title"].astype(str) + "\n" + df["content"].astype(str)).tolist()
         if not texts:
             logging.debug("No texts in chunk for dimension inference, skipping")
@@ -252,12 +255,12 @@ def build_index(
     logging.debug("make_index completed successfully")
 
     # Determine if we have an IVF-based index that needs training
-    needs_training = False
-    if isinstance(pre_index, faiss.IndexIVF):
-        needs_training = True
-    elif hasattr(pre_index, "index") and isinstance(pre_index.index, faiss.IndexIVF):
-        # GPU-wrapped IVF index
-        needs_training = True
+    # Check based on index type argument (most reliable method)
+    needs_training = "IVF" in args.index_type
+    
+    # Also log the index type for debugging
+    logging.debug(f"Index type: {args.index_type}, needs_training: {needs_training}")
+    logging.debug(f"Pre-index class: {type(pre_index).__name__}")
 
     # IVF / IVFPQ training (automatically happens on GPU if index is on GPU)
     if needs_training:
@@ -271,6 +274,10 @@ def build_index(
             args.input, limit=args.limit, chunksize=args.chunk_size
         ):
             logging.debug(f"Processing training chunk with {len(df)} rows")
+            # Drop label column and NaN values (same as in add_vectors_streaming)
+            df = df[["id", "title", "content"]].dropna()
+            logging.debug(f"After dropping label and NaN: {len(df)} rows")
+            
             texts = (
                 df["title"].astype(str) + "\n" + df["content"].astype(str)
             ).tolist()
@@ -330,6 +337,38 @@ def build_index(
 
     logging.debug("build_index function completed successfully")
     return index, dim
+
+
+def save_index(index: faiss.Index, path: str) -> None:
+    """
+    Save a FAISS index to disk, handling GPU indices properly.
+    GPU indices are moved to CPU before saving.
+    """
+    try:
+        # Try to detect if this is a GPU index by checking for GPU-specific attributes
+        is_gpu = hasattr(index, 'getDevice') or 'Gpu' in type(index).__name__
+        
+        if is_gpu:
+            logging.debug("Detected GPU index, moving to CPU for serialization")
+            # Move to CPU for saving
+            cpu_index = faiss.index_gpu_to_cpu(index)
+            faiss.write_index(cpu_index, path)
+            logging.debug("Index saved from CPU copy")
+        else:
+            # Direct save for CPU index
+            faiss.write_index(index, path)
+            logging.debug("CPU index saved directly")
+    except Exception as e:
+        logging.error(f"Failed to save index: {e}")
+        # Try fallback: force GPU to CPU conversion
+        try:
+            logging.debug("Trying fallback: forcing GPU to CPU conversion")
+            cpu_index = faiss.index_gpu_to_cpu(index)
+            faiss.write_index(cpu_index, path)
+            logging.info("Index saved using fallback method")
+        except Exception as e2:
+            logging.error(f"Fallback also failed: {e2}")
+            raise
 
 
 def chunk_tokens(
@@ -404,7 +443,8 @@ def add_vectors_streaming(
         chunk_count += 1
         logging.debug(f"Processing chunk {chunk_count} with {len(df)} rows")
         utils.validate_columns(df.columns, COLUMNS)
-        df = df[COLUMNS].dropna()
+        # Drop label column - we don't need it for building the index
+        df = df[["id", "title", "content"]].dropna()
 
         texts_list = (
             df["title"].astype(str) + "\n" + df["content"].astype(str)
@@ -468,18 +508,22 @@ def add_vectors_streaming(
         metadata_sink.write(vid_to_dbid)
         if added % args.checkpoint_every < len(ids_array):
             logging.debug(f"Checkpointing at {added} vectors")
-            faiss.write_index(index, out_path)
+            save_index(index, out_path)
             logging.info(f"Checkpointed at {added} vectors")
 
-    faiss.write_index(index, out_path)
+    save_index(index, out_path)
     logging.info(f"Done adding vectors. Total added: {added}")
-    logging.info(f"Training BM25 on {len(bm25_corpus)} documents")
-    bm25 = BM25Okapi(bm25_corpus)  # ,tokenizer=encoder)
-    bm25.doc_ids = bm25_ids
-    bm25_path = os.path.join(args.out_dir, args.bm25_out)
-    with open(bm25_path, "wb") as bm25_file:
-        pickle.dump(bm25, bm25_file)
-    logging.info(f"Done saving BM25 vectors to {bm25_path}")
+    
+    if args.build_bm25:
+        logging.info(f"Training BM25 on {len(bm25_corpus)} documents")
+        bm25 = BM25Okapi(bm25_corpus)  # ,tokenizer=encoder)
+        bm25.doc_ids = bm25_ids
+        bm25_path = os.path.join(args.out_dir, args.bm25_out)
+        with open(bm25_path, "wb") as bm25_file:
+            pickle.dump(bm25, bm25_file)
+        logging.info(f"Done saving BM25 vectors to {bm25_path}")
+    else:
+        logging.info("BM25 building skipped (--build-bm25 flag not set)")
 
 
 def main() -> None:

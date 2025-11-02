@@ -107,7 +107,8 @@ def test_rag_pipeline(
             stores=stores,
             llm=llm,
             retrieval_config=retrieval_config,
-            verbose=verbose
+            verbose=verbose,
+            debug_mode=True
         )
         
         end_time = time.time()
@@ -150,6 +151,14 @@ def test_rag_pipeline(
         
         print(f"\n📝 CREDIBLE SUMMARY:")
         print(f"   {result.reliable_summary}")
+        
+        print(f"\n📋 CLASSIFICATION PROMPT:")
+        if hasattr(result.classification, 'classification_prompt') and result.classification.classification_prompt:
+            print("=" * 80)
+            print(result.classification.classification_prompt)
+            print("=" * 80)
+        else:
+            print("   (No classification prompt available)")
         
         return result
         

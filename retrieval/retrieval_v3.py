@@ -13,6 +13,7 @@ import pandas as pd
 import re
 import tiktoken
 import numpy as np
+import os
 from pathlib import Path
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from rank_bm25 import BM25Okapi
@@ -118,6 +119,8 @@ def load_store(store_dir: str, verbose: bool = True, load_bm25: bool = False) ->
     """
     Load a store built with build_index_v3.py.
     
+    Uses pickle caching to speed up subsequent loads.
+    
     Args:
         store_dir: Directory containing the index files
         verbose: If True, print progress information for each step
@@ -126,9 +129,36 @@ def load_store(store_dir: str, verbose: bool = True, load_bm25: bool = False) ->
     Returns:
         Store object with loaded components
     """
-    logger.info(f"Step 1: Checking store directory: {store_dir}")
-    
     store_path = Path(store_dir)
+    
+    # Check for cached pickle file
+    pickle_dir = Path("/StudentData/pickle")
+    pickle_dir.mkdir(parents=True, exist_ok=True)
+    pickle_filename = f"{os.path.basename(store_path)}.pkl"
+    pickle_path = pickle_dir / pickle_filename
+    
+    if pickle_path.exists():
+        logger.info(f"Found cached store at {pickle_path}, loading from pickle...")
+        try:
+            with open(pickle_path, 'rb') as f:
+                store = pickle.load(f)
+            logger.info("Store loaded successfully from cache!")
+            
+            # Move index to GPU if available (index was saved on CPU)
+            if hasattr(faiss, 'get_num_gpus') and faiss.get_num_gpus() > 0:
+                logger.info("Moving cached index to GPU...")
+                try:
+                    res = faiss.StandardGpuResources()
+                    store.index = faiss.index_cpu_to_gpu(res, 0, store.index)
+                    logger.info("Cached index successfully moved to GPU")
+                except Exception as e:
+                    logger.warning(f"Failed to move cached index to GPU: {e}. Keeping on CPU.")
+            
+            return store
+        except Exception as e:
+            logger.warning(f"Failed to load from cache: {e}. Loading fresh store...")
+    
+    logger.info(f"Step 1: Checking store directory: {store_dir}")
     if not store_path.exists():
         raise FileNotFoundError(f"Store directory not found: {store_dir}")
     
@@ -247,6 +277,35 @@ def load_store(store_dir: str, verbose: bool = True, load_bm25: bool = False) ->
     )
     
     logger.info("Store object created successfully!")
+    
+    # Save store to pickle for faster loading next time
+    logger.info(f"Step 10: Saving store to cache ({pickle_path})...")
+    original_index = store.index
+    index_on_gpu = False
+    try:
+        # Try to convert index to CPU (needed for GPU indexes which can't be pickled)
+        # This will work whether the index is on GPU or already on CPU
+        try:
+            cpu_index = faiss.index_gpu_to_cpu(store.index)
+            # If successful, index was on GPU
+            logger.info("Moving index from GPU to CPU for pickling...")
+            store.index = cpu_index
+            index_on_gpu = True
+        except (RuntimeError, TypeError) as e:
+            # Index is already on CPU or doesn't support GPU operations
+            logger.info("Index is already on CPU, no conversion needed")
+        
+        with open(pickle_path, 'wb') as f:
+            pickle.dump(store, f, protocol=pickle.HIGHEST_PROTOCOL)
+        logger.info("Store saved to cache successfully!")
+        
+    except Exception as e:
+        logger.warning(f"Failed to save store to cache: {e}")
+    finally:
+        # Always restore GPU index if it was on GPU
+        if index_on_gpu:
+            logger.info("Restoring GPU index...")
+            store.index = original_index
     
     return store
 

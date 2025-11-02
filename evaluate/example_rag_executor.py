@@ -30,7 +30,7 @@ def main():
     
     # Create retrieval configuration
     retrieval_config = RetrievalConfig(
-        k=10,  # Number of evidence chunks to retrieve
+        k=8,  # Number of evidence chunks to retrieve
         ce_model_name=None,  # Cross-encoder model name (optional)
         diversity_type=None,  # Diversity method (optional)
         verbose=False
@@ -43,7 +43,7 @@ def main():
         retrieval_config=retrieval_config,
         prompt_type=0,  # Prompt type for summarization and classification
         naming_convention="fake_reliable",  # Naming convention for labels
-        limit=5  # Limit to 5 articles for testing
+        limit=15  # Limit to 5 articles for testing
     )
     
     print(f"Results saved to: {output_path}")

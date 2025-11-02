@@ -253,25 +253,39 @@ def _parse_classification_response(response_text: str) -> ClassificationResult:
     prediction = "reliable"  # default
     confidence = 0.5  # default
     reasoning = "Unable to parse response"
+    reasoning_started = False
+    reasoning_lines = []
 
     for line in lines:
-        line = line.strip()
-        if line.startswith("Classification:"):
-            classification_text = line.split(":", 1)[1].strip().upper()
+        line_stripped = line.strip()
+        
+        if reasoning_started:
+            # Collect all lines after "Reasoning:" as part of the reasoning
+            reasoning_lines.append(line_stripped)
+        elif line_stripped.startswith("Classification:"):
+            classification_text = line_stripped.split(":", 1)[1].strip().upper()
             if "FAKE" in classification_text:
                 prediction = "fake"
             elif "RELIABLE" in classification_text:
                 prediction = "reliable"
-        elif line.startswith("Confidence:"):
+        elif line_stripped.startswith("Confidence:"):
             try:
-                confidence_text = line.split(":", 1)[1].strip()
+                confidence_text = line_stripped.split(":", 1)[1].strip()
                 confidence = float(confidence_text)
                 # Ensure confidence is between 0 and 1
                 confidence = max(0.0, min(1.0, confidence))
             except (ValueError, IndexError):
                 confidence = 0.5
-        elif line.startswith("Reasoning:"):
-            reasoning = line.split(":", 1)[1].strip()
+        elif line_stripped.startswith("Reasoning:"):
+            # Get text on the same line (if any)
+            same_line_text = line_stripped.split(":", 1)[1].strip()
+            if same_line_text:
+                reasoning_lines.append(same_line_text)
+            reasoning_started = True
+    
+    # Combine all reasoning lines
+    if reasoning_lines:
+        reasoning = " ".join(reasoning_lines)
 
     return ClassificationResult(
         prediction=prediction,

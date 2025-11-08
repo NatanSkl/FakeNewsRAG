@@ -197,11 +197,12 @@ def classify_article(
     """
     # Use environment variable if temperature is not provided
     if temperature is None:
-        temperature = float(os.getenv('TEMPERATURE', '0.0'))
+        temperature = float(os.getenv('TEMPERATURE'))
     
     classification_system = CLASSIFICATION_SYSTEMS[promt_type]
     # Apply token limits
-    article_content_trimmed = _trim_tokens(article_content, 600)
+    article_content_tokens = int(os.getenv('ARTICLE_CONTENT_TOKENS'))
+    article_content_trimmed = _trim_tokens(article_content, article_content_tokens)
     fake_summary_trimmed = _trim_tokens(fake_summary, 300)
     reliable_summary_trimmed = _trim_tokens(reliable_summary, 300)
 

@@ -76,10 +76,10 @@ class OnlyLLMExecutor:
         # Initialize Llama client
         print("Connecting to Llama server...")
         try:
-            # Llama client expects base URL without /v1 (it adds it automatically)
+            # Ensure base URL includes /v1
             base_url = self.llm_url.rstrip('/')
-            if base_url.endswith('/v1'):
-                base_url = base_url[:-3]  # Remove /v1
+            if not base_url.endswith('/v1'):
+                base_url = base_url + '/v1'
             
             self.llm = Llama(base_url=base_url)
             print("Llama client initialized successfully")
@@ -175,7 +175,8 @@ class OnlyLLMExecutor:
             start_time = time.time()
             
             # Create prompt with token-limited content
-            content_trimmed = _trim_tokens(article['content'], 300)
+            article_content_tokens = int(os.getenv('ARTICLE_CONTENT_TOKENS'))
+            content_trimmed = _trim_tokens(article['content'], article_content_tokens)
             prompt = f"""Classify this news article as FAKE or RELIABLE and provide a brief explanation.
 
 Title: {article['title']}

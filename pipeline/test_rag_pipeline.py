@@ -26,7 +26,7 @@ def test_rag_pipeline(
     article_title: str,
     article_content: str,
     store_path: str,
-    llm_url: str = "http://127.0.0.1:8010",
+    llm_url: str = "http://127.0.0.1:8010/v1",
     llm_type: str = "llama",
     verbose: bool = False
 ) -> RAGOutput:
@@ -197,7 +197,7 @@ def test_multiple_articles():
             article_title=article["title"],
             article_content=article["content"],
             store_path="/StudentData/index",
-            llm_url="http://127.0.0.1:8010",
+            llm_url="http://127.0.0.1:8010/v1",
             llm_type="llama",
             verbose=True
         )
@@ -216,7 +216,7 @@ def main():
     parser.add_argument("--title", help="Article title to test")
     parser.add_argument("--content", help="Article content to test")
     parser.add_argument("--store", default="/StudentData/index", help="Path to index store")
-    parser.add_argument("--llm-url", default="http://127.0.0.1:8010", help="LLM server URL")
+    parser.add_argument("--llm-url", default="http://127.0.0.1:8010/v1", help="LLM server URL")
     parser.add_argument("--llm-type", choices=["llama", "mistral"], default="llama", help="LLM type")
     parser.add_argument("--test", choices=["single", "multiple"], default="single", help="Test type")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")

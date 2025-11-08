@@ -194,7 +194,7 @@ def contrastive_summaries(
     """
     # Use environment variable if temperature is not provided
     if temperature is None:
-        temperature = float(os.getenv('TEMPERATURE', '0.0'))
+        temperature = float(os.getenv('TEMPERATURE'))
     
     summary_system = SUMMARY_SYSTEMS[promt_type]
     summary_user_template = SUMMARY_USER_TEMPLATES[promt_type]

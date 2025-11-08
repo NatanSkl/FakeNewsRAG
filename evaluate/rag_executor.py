@@ -93,10 +93,10 @@ class RAGExecutor:
         # Initialize Llama client
         print("Connecting to Llama server...")
         try:
-            # Llama client expects base URL without /v1 (it adds it automatically)
+            # Ensure base URL includes /v1
             base_url = self.llm_url.rstrip('/')
-            if base_url.endswith('/v1'):
-                base_url = base_url[:-3]  # Remove /v1
+            if not base_url.endswith('/v1'):
+                base_url = base_url + '/v1'
             
             self.llm = Llama(base_url=base_url)
             print("Llama client initialized successfully")

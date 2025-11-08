@@ -15,6 +15,7 @@ from retrieval import load_store, retrieve_evidence, RetrievalConfig
 
 import numpy as np
 import datetime as dt
+import time
 from dataclasses import dataclass
 from typing import List, Dict, Any
 
@@ -47,6 +48,13 @@ def _get_timestamp() -> str:
     return dt.datetime.now().strftime("%H:%M")
 
 
+def _update_progress(callback, stage: str, progress: float, sleep_time: float = 0.1):
+    """Helper to update progress and add a small delay for visibility."""
+    if callback:
+        callback(stage, progress)
+        time.sleep(sleep_time)
+
+
 def classify_article_rag(
     article_title: str,
     article_content: str,
@@ -59,7 +67,8 @@ def classify_article_rag(
     verbose: bool = False,
     prompt_type: int = 0,
     naming_convention: str = "fake_reliable",
-    debug_mode: bool = False
+    debug_mode: bool = False,
+    progress_callback = None
 ) -> RAGOutput:
     """
     Full RAG pipeline for article classification.
@@ -76,12 +85,15 @@ def classify_article_rag(
         prompt_type: Type of prompt to use for summarization and classification
         naming_convention: Naming convention for classification labels
         debug_mode: If True, returns debug information including prompts
+        progress_callback: Optional callback function(stage: str, progress: float) called at each stage
     
     Returns:
         RAGOutput with classification results and evidence
     """
     logger.info(f"[RAG Pipeline] Starting classification for: '{article_title[:50]}...'")
     logger.info("[RAG Pipeline] Using pre-loaded stores")
+    
+    _update_progress(progress_callback, "Initializing retrieval configuration", 0.10)
     
     # Use default config if none provided
     if retrieval_config is None:
@@ -94,6 +106,7 @@ def classify_article_rag(
         logger.info("[RAG Pipeline] Using default retrieval config")
     
     # Retrieve evidence for both labels
+    _update_progress(progress_callback, "Retrieving fake evidence", 0.20)
     logger.info("[RAG Pipeline] Retrieving fake evidence...")
     fake_hits = retrieve_evidence(
         stores, 
@@ -102,7 +115,9 @@ def classify_article_rag(
         retrieval_config
     )
     logger.info(f"[RAG Pipeline] Retrieved {len(fake_hits)} fake evidence chunks")
+    _update_progress(progress_callback, "Retrieved fake evidence", 0.35)
     
+    _update_progress(progress_callback, "Retrieving reliable evidence", 0.40)
     logger.info("[RAG Pipeline] Retrieving reliable evidence...")
     credible_hits = retrieve_evidence(
         stores, 
@@ -111,6 +126,7 @@ def classify_article_rag(
         retrieval_config
     )
     logger.info(f"[RAG Pipeline] Retrieved {len(credible_hits)} reliable evidence chunks")
+    _update_progress(progress_callback, "Retrieved reliable evidence", 0.50)
     
     # Convert hits to EvidenceChunk objects
     logger.info("[RAG Pipeline] Converting evidence to chunks...")
@@ -144,6 +160,7 @@ def classify_article_rag(
     )
     
     # Generate contrastive summaries
+    _update_progress(progress_callback, "Generating contrastive summaries (calling LLM)", 0.60)
     logger.info("[RAG Pipeline] Generating contrastive summaries...")
     summaries = contrastive_summaries(
         llm, article, fake_evidence, credible_evidence, promt_type=prompt_type, return_debug=debug_mode
@@ -151,8 +168,10 @@ def classify_article_rag(
     fake_summary = summaries["fake_summary"]
     reliable_summary = summaries["reliable_summary"]
     logger.info("[RAG Pipeline] Summaries generated successfully")
+    _update_progress(progress_callback, "Summaries generated", 0.75)
     
     # Classify the article
+    _update_progress(progress_callback, "Classifying article (calling LLM)", 0.85)
     logger.info("[RAG Pipeline] Classifying article...")
     classification = classify_article(
         llm,
@@ -165,6 +184,7 @@ def classify_article_rag(
         return_debug=debug_mode
     )
     logger.info(f"[RAG Pipeline] Classification completed: {classification.prediction} (confidence: {classification.confidence:.3f})")
+    _update_progress(progress_callback, "Classification complete", 1.00)
     logger.info("[RAG Pipeline] RAG pipeline completed successfully!")
     
     return RAGOutput(

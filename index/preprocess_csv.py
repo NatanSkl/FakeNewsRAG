@@ -61,8 +61,16 @@ def check_exists(path: str) -> bool:
 
 
 def preprocess(csv_path, output_path):
-    if check_exists(csv_path):
+    # Check if output already exists, skip if it does
+    if check_exists(output_path):
+        print(f"Skipping preprocessing - output already exists: {output_path}")
         return
+    
+    # Check if input exists
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"Input file not found: {csv_path}")
+    
+    print(f"Preprocessing {csv_path} -> {output_path}")
     row_count = 0
     with pd.read_csv(
         csv_path,
@@ -77,15 +85,25 @@ def preprocess(csv_path, output_path):
             else:
                 new_chunk.to_csv(output_path, index=False, header=True)
             del chunk, new_chunk
+    print(f"✓ Preprocessing complete: {row_count} rows processed")
 
 
 def balanced_sample(
     csv_path, output_path, output_path_fake, output_path_reliable, max_rows
 ):
+    # Check if input exists
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"Preprocessed file not found: {csv_path}. Please run preprocessing first.")
+    
+    print(f"Creating balanced sample from {csv_path}")
     df = pd.read_csv(csv_path, engine="python")
     counts = df["label"].value_counts(sort=False)
+    print(f"Label counts: {counts.to_dict()}")
+    
     rows_per_label = max_rows // len(VALID_LABELS)
     rows_per_label = int(min(rows_per_label, counts.min()))
+    print(f"Sampling {rows_per_label} rows per label...")
+    
     sampled = df.groupby("label", group_keys=False).sample(
         n=rows_per_label, random_state=SEED
     )
@@ -93,9 +111,15 @@ def balanced_sample(
 
     sampled_fake = sampled[sampled["label"] == "fake"]
     sampled_reliable = sampled[sampled["label"] == "reliable"]
+    
+    print(f"Writing balanced samples:")
+    print(f"  - {output_path_fake} ({len(sampled_fake)} rows)")
+    print(f"  - {output_path_reliable} ({len(sampled_reliable)} rows)")
+    
     sampled_fake.to_csv(output_path_fake, index=False)
     sampled_reliable.to_csv(output_path_reliable, index=False)
     sampled.to_csv(output_path, index=False)
+    print("✓ Balanced sampling complete")
     return sampled
 
 

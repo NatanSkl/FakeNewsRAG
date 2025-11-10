@@ -168,6 +168,9 @@ def find_matching_file(prefix: str, metrics_dir: str) -> str:
     return matches[0]
 
 
+# TODO order by names, it should be prompt 
+
+
 def plot_grouped_metrics(groups: Dict[str, List[str]], output_dir: str, 
                          metrics_dir: str = None):
     """
@@ -217,29 +220,63 @@ def plot_grouped_metrics(groups: Dict[str, List[str]], output_dir: str,
             experiment_names.append(extract_label_info(filename, group_name))
             filenames.append(filename)
         
-        # Sort Group 2 by prompt type
-        if 'Group2' in group_name:
-            # Extract prompt numbers for sorting
-            sort_data = []
-            for i, filename in enumerate(filenames):
-                # Extract prompt number
-                prompt_num = -1
-                for part in filename.split('_'):
-                    if part.startswith('prompt='):
-                        try:
-                            prompt_num = int(part.split('=')[1])
-                        except:
-                            pass
-                        break
-                sort_data.append((prompt_num, experiments_data[i], experiment_names[i], filename))
+        # Sort by prompt type (0, 1, 2) and then by naming convention (type1_type2, then fake_reliable)
+        # This ensures bars and legend appear in the correct order
+        sort_data = []
+        for i, filename in enumerate(filenames):
+            # Extract prompt number
+            prompt_num = -1
+            for part in filename.split('_'):
+                if part.startswith('prompt='):
+                    try:
+                        prompt_num = int(part.split('=')[1])
+                    except:
+                        pass
+                    break
             
-            # Sort by prompt number
-            sort_data.sort(key=lambda x: x[0])
+            # Extract naming convention
+            # Handle cases where naming value contains underscores (e.g., "naming=type1_type2")
+            naming = None
+            if 'naming=' in filename:
+                # Find the start of naming=
+                naming_start = filename.find('naming=')
+                # Extract from naming= to _metrics.json
+                naming_part = filename[naming_start:]
+                # Remove 'naming=' prefix
+                naming = naming_part.split('naming=', 1)[1]
+                # Remove _metrics.json suffix and anything after it (like _limit=5)
+                if '_metrics.json' in naming:
+                    naming = naming.split('_metrics.json')[0]
+                # Also handle cases where there might be _limit=X before _metrics.json
+                # Extract only the naming value (everything before the next _key= pattern)
+                # But since naming is typically the last parameter, we should be fine
+                # Just strip any trailing _limit=X if present
+                if '_limit=' in naming:
+                    naming = naming.split('_limit=')[0]
+                # Now naming should be either "type1_type2" or "fake_reliable"
             
-            # Unpack sorted data
-            experiments_data = [x[1] for x in sort_data]
-            experiment_names = [x[2] for x in sort_data]
-            filenames = [x[3] for x in sort_data]
+            # Determine naming order: type1_type2 = 0, fake_reliable = 1
+            # type1_type2 should come first (order 0), fake_reliable second (order 1)
+            naming_order = 2  # default for unknown naming conventions
+            if naming == 'type1_type2':
+                naming_order = 0  # First
+            elif naming == 'fake_reliable':
+                naming_order = 1  # Second
+            # else: naming_order = 2 (last)
+            
+            sort_data.append((prompt_num, naming_order, experiments_data[i], experiment_names[i], filename))
+        
+        # Debug: print what we extracted (can remove later)
+        # for item in sort_data:
+        #     print(f"DEBUG: prompt={item[0]}, naming_order={item[1]}, filename={item[4]}")
+        
+        # Sort by prompt number first, then by naming order
+        sort_data.sort(key=lambda x: (x[0], x[1]))
+        
+        # Unpack sorted data - this order will be used for bars and legend
+        experiments_data = [x[2] for x in sort_data]
+        experiment_names = [x[3] for x in sort_data]
+        filenames = [x[4] for x in sort_data]
         
         if not experiments_data:
             print(f"Warning: No data found for group {group_name}")

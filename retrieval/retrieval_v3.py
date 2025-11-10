@@ -131,8 +131,13 @@ def load_store(store_dir: str, verbose: bool = True, load_bm25: bool = False) ->
     """
     store_path = Path(store_dir)
     
+    # Get STORAGE_DIR from environment
+    from dotenv import load_dotenv
+    load_dotenv('params.env')
+    STORAGE_DIR = os.getenv('STORAGE_DIR', '/StudentData/reproduce')
+    
     # Check for cached pickle file
-    pickle_dir = Path("/StudentData/pickle")
+    pickle_dir = Path(STORAGE_DIR) / "pickle"
     pickle_dir.mkdir(parents=True, exist_ok=True)
     pickle_filename = f"{os.path.basename(store_path)}.pkl"
     pickle_path = pickle_dir / pickle_filename
@@ -252,7 +257,12 @@ def load_store(store_dir: str, verbose: bool = True, load_bm25: bool = False) ->
     # Load original CSV data
     logger.info("Step 7: Loading original CSV data...")
     
-    original_path = Path("/StudentData/preprocessed/train.csv")
+    # Get STORAGE_DIR from environment
+    from dotenv import load_dotenv
+    load_dotenv('params.env')
+    STORAGE_DIR = os.getenv('STORAGE_DIR', '/StudentData/reproduce')
+    
+    original_path = Path(STORAGE_DIR) / "preprocessed" / "train.csv"
     if not original_path.exists():
         raise FileNotFoundError(f"Original CSV not found at {original_path}")
     

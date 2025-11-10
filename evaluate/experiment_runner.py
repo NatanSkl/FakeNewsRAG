@@ -7,10 +7,19 @@ of parameters. Handles errors gracefully and tracks experiment results.
 
 import sys
 import time
+import os
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
 from itertools import product
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv('params.env')
+
+# Get STORAGE_DIR from environment, default to /StudentData/reproduce
+STORAGE_DIR = os.getenv('STORAGE_DIR', '/StudentData/reproduce')
+DEFAULT_STORE_PATH = os.path.join(STORAGE_DIR, 'index')
 
 # Add parent to path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -52,7 +61,7 @@ class ExperimentRunner:
     def __init__(
         self,
         llm_url: str = "http://127.0.0.1:8010",
-        store_path: str = "/StudentData/index",
+        store_path: str = None,
         debug_mode: bool = True
     ):
         """
@@ -64,7 +73,7 @@ class ExperimentRunner:
             debug_mode: Whether to save debug information (prompts)
         """
         self.llm_url = llm_url
-        self.store_path = store_path
+        self.store_path = store_path or DEFAULT_STORE_PATH
         self.debug_mode = debug_mode
         self.executor = None
         
@@ -169,6 +178,7 @@ class ExperimentRunner:
         limit: Optional[int] = None,
         fix_missing: bool = False
     ) -> List[ExperimentResult]:
+        print(f"\n🔍 DEBUG run_experiments: limit = {limit} (type: {type(limit)})")
         """
         Run all experiments defined by the cartesian product of parameters.
         
@@ -320,7 +330,7 @@ Examples:
     parser.add_argument("csv_path", help="Path to input CSV file")
     parser.add_argument("--output-dir", default="experiments", help="Output directory")
     parser.add_argument("--llm-url", default="http://127.0.0.1:8010", help="LLM server URL")
-    parser.add_argument("--store-path", default="/StudentData/index", help="Path to store directory")
+    parser.add_argument("--store-path", default=DEFAULT_STORE_PATH, help="Path to store directory")
     
     # Experiment parameters
     parser.add_argument(
@@ -389,6 +399,9 @@ Examples:
         print("="*80)
         
         sys.exit(0)
+    
+    # Debug: Print limit value
+    print(f"\n🔍 DEBUG: args.limit = {args.limit} (type: {type(args.limit)})")
     
     # Run experiments
     results = runner.run_experiments(

@@ -10,8 +10,13 @@ import json
 import os
 from pathlib import Path
 from typing import List, Dict, Any
+from dotenv import load_dotenv
 import matplotlib.pyplot as plt
 import numpy as np
+
+# Load environment variables
+load_dotenv('params.env')
+STORAGE_DIR = os.getenv('STORAGE_DIR', '/StudentData/reproduce')
 
 
 def load_json_file(filepath: str) -> Dict[str, Any]:
@@ -133,16 +138,49 @@ def get_group_title(group_name: str) -> str:
         return f"Metrics Comparison - {group_name}"
 
 
+def find_matching_file(prefix: str, metrics_dir: str) -> str:
+    """
+    Find a metrics file that starts with the given prefix.
+    
+    Args:
+        prefix: The prefix to match (without _metrics.json suffix)
+        metrics_dir: Directory to search in
+        
+    Returns:
+        Full filename of matching file, or None if not found
+    """
+    if not os.path.exists(metrics_dir):
+        return None
+    
+    # Get all metrics files
+    all_files = [f for f in os.listdir(metrics_dir) if f.endswith('_metrics.json')]
+    
+    # Find files that start with the prefix
+    matches = [f for f in all_files if f.startswith(prefix)]
+    
+    if not matches:
+        return None
+    
+    # If multiple matches, prefer the one without 'limit=' (or return first)
+    # Sort to put files without 'limit=' first
+    matches.sort(key=lambda x: ('limit=' in x, x))
+    
+    return matches[0]
+
+
 def plot_grouped_metrics(groups: Dict[str, List[str]], output_dir: str, 
-                         metrics_dir: str = '/home/student/FakeNewsRAG/metrics_reason_support'):
+                         metrics_dir: str = None):
     """
     Create grouped bar charts for metrics comparison.
     
     Args:
-        groups: Dictionary mapping group names to lists of metric file paths
+        groups: Dictionary mapping group names to lists of metric file prefixes (without _metrics.json)
         output_dir: Directory to save the output plots
-        metrics_dir: Directory containing the metrics JSON files
+        metrics_dir: Directory containing the metrics JSON files (default: STORAGE_DIR/metrics_reason_support)
     """
+    if metrics_dir is None:
+        metrics_dir = str(Path(STORAGE_DIR) / "metrics_reason_support")
+    
     os.makedirs(output_dir, exist_ok=True)
     
     metric_names = ['f1', 'accuracy', 'precision', 'recall', 'mean_correct', 'mean_incorrect']
@@ -153,7 +191,21 @@ def plot_grouped_metrics(groups: Dict[str, List[str]], output_dir: str,
         experiment_names = []
         filenames = []
         
-        for filename in file_list:
+        for file_prefix in file_list:
+            # Remove _metrics.json if present (to get the prefix)
+            prefix = file_prefix.replace('_metrics.json', '')
+            
+            # Find matching file
+            filename = find_matching_file(prefix, metrics_dir)
+            
+            if filename is None:
+                print(f"Warning: No file found starting with: {prefix}")
+                continue
+            
+            # Show which file was matched
+            if filename != f"{prefix}_metrics.json":
+                print(f"  Matched '{prefix}' -> '{filename}'")
+            
             filepath = os.path.join(metrics_dir, filename)
             if not os.path.exists(filepath):
                 print(f"Warning: File not found: {filepath}")
@@ -266,8 +318,8 @@ def get_all_files_except(directory: str, exclude_pattern: str) -> List[str]:
 
 def main():
     """Main function to define groups and create visualizations."""
-    metrics_dir = '/home/student/FakeNewsRAG/metrics_reason_support'
-    output_dir = '/home/student/FakeNewsRAG/visualize/output'
+    metrics_dir = str(Path(STORAGE_DIR) / "metrics_reason_support")
+    output_dir = str(Path(STORAGE_DIR) / "visualized")
     
     # Define groups of experiments
     groups = {
@@ -294,11 +346,12 @@ def main():
     print(f"Output directory: {output_dir}")
     print()
     
-    # Show what files are in each group
+    # Show what prefixes are in each group
     for group_name, file_list in groups.items():
         print(f"\n{group_name}:")
         for f in file_list:
-            print(f"  - {f}")
+            prefix = f.replace('_metrics.json', '')
+            print(f"  - Looking for files starting with: {prefix}")
     
     print("\n" + "="*80 + "\n")
     

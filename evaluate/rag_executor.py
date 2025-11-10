@@ -16,6 +16,10 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv('params.env')
 
+# Get STORAGE_DIR from environment, default to /StudentData/reproduce
+STORAGE_DIR = os.getenv('STORAGE_DIR', '/StudentData/reproduce')
+DEFAULT_STORE_PATH = os.path.join(STORAGE_DIR, 'index')
+
 # Add parent to path
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
@@ -70,9 +74,9 @@ class RAGClassificationResult:
 class RAGExecutor:
     """Executor for RAG pipeline classification that processes CSV files."""
     
-    def __init__(self, llm_url: str = "http://127.0.0.1:8010", store_path: str = "/StudentData/index", debug_mode: bool = True):
+    def __init__(self, llm_url: str = "http://127.0.0.1:8010", store_path: str = None, debug_mode: bool = True):
         self.llm_url = llm_url
-        self.store_path = store_path
+        self.store_path = store_path or DEFAULT_STORE_PATH
         self.debug_mode = debug_mode
         self.llm = None
         self.stores = None
@@ -137,6 +141,7 @@ class RAGExecutor:
                         naming_convention: str = "fake_reliable",
                         limit: int = None,
                         fix_missing: bool = False) -> str:
+        print(f"\n🔍 DEBUG run_rag_pipeline: limit = {limit} (type: {type(limit)})")
         """
         Run RAG pipeline on a CSV file and save results.
         
@@ -164,9 +169,13 @@ class RAGExecutor:
         print(f"Loaded {len(articles)} articles")
         
         # Apply limit if specified
-        if limit:
+        if limit is not None:
+            print(f"🔢 Limit specified: {limit} articles")
+            original_count = len(articles)
             articles = articles[:limit]
-            print(f"Limited to {len(articles)} articles for testing")
+            print(f"✅ Limited from {original_count} to {len(articles)} articles for testing")
+        else:
+            print(f"ℹ️  No limit specified - processing all {len(articles)} articles")
         
         # Generate output filename based on configuration
         output_filename = self._generate_output_filename(csv_path, retrieval_config, prompt_type, naming_convention, limit)
@@ -441,7 +450,7 @@ def main():
     parser.add_argument("csv_path", help="Path to input CSV file")
     parser.add_argument("--output-dir", default="experiments", help="Output directory")
     parser.add_argument("--llm-url", default="http://127.0.0.1:8010", help="LLM server URL")
-    parser.add_argument("--store-path", default="/StudentData/index", help="Path to store directory")
+    parser.add_argument("--store-path", default=DEFAULT_STORE_PATH, help="Path to store directory")
     parser.add_argument("--limit", type=int, help="Limit number of articles to process (for testing)")
     parser.add_argument("--fix-missing", action="store_true", help="Only process rows with missing results")
     

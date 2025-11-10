@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv('params.env')
+STORAGE_DIR = os.getenv('STORAGE_DIR', '/StudentData/reproduce')
 
 # Add parent to path
 import sys
@@ -45,14 +46,18 @@ def _trim_tokens(s: str, max_tokens: int) -> str:
 class ReasoningEvaluator:
     """Evaluates reasoning support from article content using LLM."""
     
-    def __init__(self, llm_client: Optional[Llama] = None, articles_csv: str = "/StudentData/preprocessed/news_balanced.csv"):
+    def __init__(self, llm_client: Optional[Llama] = None, articles_csv: str = None):
         """Initialize the reasoning evaluator.
         
         Args:
             llm_client: LLM client to use for evaluation. If None, creates a Llama client.
-            articles_csv: Path to CSV file containing article content.
+            articles_csv: Path to CSV file containing article content. If None, uses STORAGE_DIR/preprocessed/news_balanced.csv.
         """
         self.llm = llm_client or Llama()
+        
+        # Set default articles_csv path if not provided
+        if articles_csv is None:
+            articles_csv = str(Path(STORAGE_DIR) / "preprocessed" / "news_balanced.csv")
         
         print("="*80)
         print("REASONING SUPPORT EVALUATION SYSTEM")
@@ -327,10 +332,11 @@ Score:"""
             new_dir_name = f"{parent_name}_reason_support"
             new_dir = parent_dir.parent / new_dir_name
         else:
-            # For absolute paths, create output dir alongside input dir
+            # For absolute paths, create output dir at same level as input dir
+            # e.g., STORAGE_DIR/experiments/file.csv -> STORAGE_DIR/experiments_reason_support/file.csv
             parent_name = parent_dir.name if parent_dir.name else "data"
             new_dir_name = f"{parent_name}_reason_support"
-            new_dir = parent_dir / new_dir_name
+            new_dir = parent_dir.parent / new_dir_name
         
         # Keep the same filename
         output_path = new_dir / input_path.name
@@ -346,7 +352,8 @@ def main():
         description="Evaluate reasoning support from article content using LLM"
     )
     parser.add_argument("csv_path", help="Path to CSV file with classification results")
-    parser.add_argument("--articles-csv", default="/StudentData/preprocessed/news_balanced.csv",
+    default_articles_csv = str(Path(STORAGE_DIR) / "preprocessed" / "news_balanced.csv")
+    parser.add_argument("--articles-csv", default=default_articles_csv,
                        help="Path to CSV file with article content")
     
     args = parser.parse_args()

@@ -24,8 +24,12 @@ st.markdown(
 )
 
 # ----------------- Defaults -----------------
-STORE_DIR = "/StudentData/index"
-#STORE_DIR = "./index"
+# Load STORAGE_DIR from params.env
+from dotenv import load_dotenv
+import os
+load_dotenv('params.env')
+STORAGE_DIR = os.getenv('STORAGE_DIR', '/StudentData/reproduce')
+STORE_DIR = os.path.join(STORAGE_DIR, 'index')
 LLM_URL = "http://127.0.0.1:8010/v1"
 LLM_TYPE = "llama"
 

@@ -4,12 +4,24 @@ Run reasoning support evaluations on all CSV files in experiments directory.
 Evaluates how well reasoning is supported by the actual article content.
 """
 
+import os
+import sys
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Add project root to path to import from evaluate
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
 from evaluate.reasoning_evaluator import ReasoningEvaluator
 
 def main():
+    # Load STORAGE_DIR from params.env
+    load_dotenv('params.env')
+    STORAGE_DIR = os.getenv('STORAGE_DIR', '/StudentData/reproduce')
+    
     # Directory containing files to evaluate
-    eval_dir = Path("/home/student/FakeNewsRAG/experiments")
+    eval_dir = Path(STORAGE_DIR) / "experiments"
     
     # Create evaluator
     print("Initializing evaluator...")
@@ -37,10 +49,9 @@ def main():
     print("\n" + "="*80)
     print("ALL EVALUATIONS COMPLETE")
     print("="*80)
-    print(f"Results saved to: experiments_reason_support/")
+    output_dir = Path(STORAGE_DIR) / "experiments_reason_support"
+    print(f"Results saved to: {output_dir}/")
 
 if __name__ == "__main__":
     main()
-
-
 

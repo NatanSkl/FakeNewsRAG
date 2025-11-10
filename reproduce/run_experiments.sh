@@ -42,10 +42,11 @@ fi
 mkdir -p "$EXPERIMENTS_DIR"
 
 # Determine limit flag based on DEBUG_REPRODUCE
-LIMIT_FLAG=""
+LIMIT_ARGS=()
 if [ "$DEBUG_REPRODUCE" = "1" ]; then
-    LIMIT_FLAG="--limit 5"
-    echo "🐛 DEBUG MODE: Limiting to 5 articles per experiment"
+    LIMIT_ARGS=("--limit" "2")
+    echo "🐛 DEBUG MODE: Limiting to 2 articles per experiment"
+    echo "   Limit args: ${LIMIT_ARGS[@]}"
 fi
 
 # ==============================================================================
@@ -114,6 +115,15 @@ echo "========================================="
 echo ""
 echo "Experiment 1: default optimized, prompt-type 0, fake_reliable"
 echo "------------------------------------------------------------"
+echo "$RAG2_PYTHON \"$PROJECT_ROOT/evaluate/experiment_runner.py\" \\"
+echo "    \"$VAL_OUTPUT\" \\"
+echo "    --retrieval-configs default optimized \\"
+echo "    --prompt-types 0 \\"
+echo "    --naming-conventions fake_reliable \\"
+echo "    --store-path \"$STORE_PATH\" \\"
+echo "    --llm-url \"$LLM_URL\" \\"
+echo "    --output-dir \"$EXPERIMENTS_DIR\" \\"
+echo "    \"${LIMIT_ARGS[@]}\""
 $RAG2_PYTHON "$PROJECT_ROOT/evaluate/experiment_runner.py" \
     "$VAL_OUTPUT" \
     --retrieval-configs default optimized \
@@ -122,7 +132,7 @@ $RAG2_PYTHON "$PROJECT_ROOT/evaluate/experiment_runner.py" \
     --store-path "$STORE_PATH" \
     --llm-url "$LLM_URL" \
     --output-dir "$EXPERIMENTS_DIR" \
-    $LIMIT_FLAG
+    "${LIMIT_ARGS[@]}"
 
 # Experiment 2: optimized, prompt-types 0 1 2, naming fake_reliable type1_type2
 echo ""
@@ -136,7 +146,7 @@ $RAG2_PYTHON "$PROJECT_ROOT/evaluate/experiment_runner.py" \
     --store-path "$STORE_PATH" \
     --llm-url "$LLM_URL" \
     --output-dir "$EXPERIMENTS_DIR" \
-    $LIMIT_FLAG
+    "${LIMIT_ARGS[@]}"
 
 # ==============================================================================
 # Step 3: Run experiments on test set
@@ -159,7 +169,7 @@ $RAG2_PYTHON "$PROJECT_ROOT/evaluate/experiment_runner.py" \
     --store-path "$STORE_PATH" \
     --llm-url "$LLM_URL" \
     --output-dir "$EXPERIMENTS_DIR" \
-    $LIMIT_FLAG
+    "${LIMIT_ARGS[@]}"
 
 # Experiment 4: Only LLM executor on test set
 echo ""
@@ -169,7 +179,7 @@ $RAG2_PYTHON "$PROJECT_ROOT/evaluate/only_llm_executor.py" \
     "$TEST_OUTPUT" \
     --llm-url "$LLM_URL" \
     --output-dir "$EXPERIMENTS_DIR" \
-    $LIMIT_FLAG
+    "${LIMIT_ARGS[@]}"
 
 # ==============================================================================
 # Summary
@@ -189,7 +199,7 @@ echo "  3. Test: prompt-type 2, naming fake_reliable"
 echo "  4. Test: Only LLM executor"
 if [ "$DEBUG_REPRODUCE" = "1" ]; then
     echo ""
-    echo "⚠️  DEBUG MODE: All experiments limited to 5 articles"
+    echo "⚠️  DEBUG MODE: All experiments limited to 2 articles"
 fi
 echo ""
 

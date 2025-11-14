@@ -1,0 +1,27 @@
+{
+  "metrics": {
+    "accuracy": 0.69,
+    "precision": 0.8064516129032258,
+    "recall": 0.5,
+    "f1_score": 0.6172839506172839,
+    "true_positives": 25,
+    "false_positives": 6,
+    "true_negatives": 44,
+    "false_negatives": 25,
+    "avg_time_per_article": 110.2930935883522,
+    "total_time": 11029.30935883522,
+    "total_articles": 100,
+    "predicted_fake_count": 31,
+    "predicted_reliable_count": 69,
+    "true_fake_count": 50,
+    "true_reliable_count": 50,
+    "reasoning_alignment_mean": 0.5889999999999996,
+    "reasoning_alignment_variance": 0.06811700000000002,
+    "reasoning_alignment_mean_correct": 0.6236231884057968,
+    "reasoning_alignment_variance_correct": 0.058759336273892,
+    "reasoning_alignment_mean_incorrect": 0.5119354838709679,
+    "reasoning_alignment_variance_incorrect": 0.08033818938605623
+  },
+  "timestamp": "2025-11-07 11:55:28",
+  "source_csv": "/home/student/FakeNewsRAG/experiments_reason_support/val_sampled_rag_ce=ms-marco-MiniLM-L-6-v2_diversity=mmr_prompt=2_naming=fake_reliable.csv"
+}

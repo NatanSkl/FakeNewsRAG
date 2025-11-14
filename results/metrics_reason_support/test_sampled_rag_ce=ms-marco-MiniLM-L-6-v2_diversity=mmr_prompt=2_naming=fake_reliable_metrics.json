@@ -1,0 +1,27 @@
+{
+  "metrics": {
+    "accuracy": 0.61,
+    "precision": 0.6666666666666666,
+    "recall": 0.44,
+    "f1_score": 0.5301204819277109,
+    "true_positives": 22,
+    "false_positives": 11,
+    "true_negatives": 39,
+    "false_negatives": 28,
+    "avg_time_per_article": 121.91948338747025,
+    "total_time": 12191.948338747025,
+    "total_articles": 100,
+    "predicted_fake_count": 33,
+    "predicted_reliable_count": 67,
+    "true_fake_count": 50,
+    "true_reliable_count": 50,
+    "reasoning_alignment_mean": 0.6009999999999999,
+    "reasoning_alignment_variance": 0.0670370000000001,
+    "reasoning_alignment_mean_correct": 0.6185245901639344,
+    "reasoning_alignment_variance_correct": 0.06593388873958608,
+    "reasoning_alignment_mean_incorrect": 0.5735897435897436,
+    "reasoning_alignment_variance_incorrect": 0.06753070348454965
+  },
+  "timestamp": "2025-11-07 17:01:13",
+  "source_csv": "experiments_reason_support/test_sampled_rag_ce=ms-marco-MiniLM-L-6-v2_diversity=mmr_prompt=2_naming=fake_reliable.csv"
+}

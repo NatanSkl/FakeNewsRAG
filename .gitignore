@@ -11,7 +11,6 @@ models/
 *.safetensors
 
 # Résultats temporaires
-*.png
 *.jpg
 *.jpeg
 *.pdf
@@ -19,6 +18,8 @@ models/
 evaluation_results/
 test_results/
 demo_results/
+experiments/
+metrics/
 
 # Fichiers Python temporaires
 __pycache__/
@@ -79,9 +80,6 @@ index_tmp/store_full/
 index/data/
 index/store_slice
 models/
-
-experiments*/
-metrics*/
 
 data/
 data_reason_eval/

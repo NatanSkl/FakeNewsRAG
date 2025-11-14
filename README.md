@@ -22,11 +22,11 @@ allowing users to inspect retrieved evidence, summaries, and reasoning.
 
 | Feature | Description |
 |----------|-------------|
-| **RAG-based Fact-Checking** | Integrates semantic retrieval (FAISS + BM25) with LLM-based reasoning. |
+| **RAG-based Fact-Checking** | Integrates semantic retrieval (FAISS) with LLM-based reasoning. |
 | **Contrastive Summaries** | Generates two opposing factual summaries — one from *fake* and one from *reliable* evidence — for side-by-side evaluation. |
 | **Explainable Classification** | The model’s verdict (“Fake” or “Reliable”) is backed by textual evidence and LLM reasoning. |
 | **Dynamic Cross-Encoder Re-Ranking** | Enhances retrieval accuracy using a cross-encoder (e.g., `ms-marco-MiniLM-L-6-v2`). |
-| **Diversity-Aware Retrieval** | Optional Maximal Marginal Relevance (MMR) and xQuAD diversification ensure balanced evidence. |
+| **Diversity-Aware Retrieval** | Optional Maximal Marginal Relevance (MMR) ensures balanced evidence. |
 | **Transparent UI** | Built with **Streamlit**, showing pipeline stages, live progress, and full console output. |
 
 ---
@@ -42,9 +42,8 @@ allowing users to inspect retrieved evidence, summaries, and reasoning.
        ┌──────────────────────────────────────────────┐
        │ Retrieve top-k fake & reliable evidence       │
        │  • FAISS dense retrieval                     │
-       │  • BM25 lexical retrieval (optional)          │
        │  • Cross-encoder reranking                    │
-       │  • MMR/xQuAD diversity                        │
+       │  • MMR diversity                              │
        └──────────────────────────────────────────────┘
                            │
                            ▼
@@ -79,62 +78,167 @@ git clone https://github.com/<your-username>/FakeNewsRAG.git
 cd FakeNewsRAG
 ```
 
-#### 2️⃣ Create and activate a virtual environment
-
-**Windows (PowerShell):**
-
-python -m venv .venv
-
-.venv\Scripts\activate
-
-**macOS / Linux:**
-
-python3 -m venv .venv
-
-source .venv/bin/activate
-
-#### 3️⃣ Install dependencies
-pip install -r requirements.txt
-
-#### 🧭Running the LLM Backend
-
-The pipeline uses a local Llama and Gemma server.
-
-Before launching the app, make sure you have a running LLM server:
-```
-Llama:
-python -m llama_cpp.server `
-  --model ./models/mistral-7b-instruct/mistral-7b-instruct-v0.2.Q4_K_M.gguf `
-  --n_gpu_layers -1 --n_ctx 2048 --n_batch 256 --offload_kqv true `
-  --host 127.0.0.1 --port 8011
-
-Gemma:
-python -m llama_cpp.server \
-  --model /home/student/models/gemma-3-1b-it-Q4_K_M.gguf \
-  --n_gpu_layers -1 \
-  --n_ctx 4096 \
-  --n_batch 192 \
-  --offload_kqv true \
-  --host 127.0.0.1 --port 8012
+#### 2️⃣ Configure storage directory
+Edit `params.env` to set `STORAGE_DIR` to your desired directory for all downloads and installations:
+```bash
+STORAGE_DIR=/path/to/your/storage
 ```
 
-#### 🧭 Running the Streamlit App
+#### 3️⃣ Create conda environments
+```bash
+bash reproduce/create_conda_envs.sh
+```
+This creates two conda environments:
+- `$STORAGE_DIR/llama-cuda` - for running LLM servers
+- `$STORAGE_DIR/rag2` - for running experiments and evaluations
+
+#### 4️⃣ Download LLM models
+Set your HuggingFace token and download models:
+```bash
+export HF_TOKEN=your_huggingface_token_here
+bash reproduce/download_llms.sh
+```
+
+#### 5️⃣ Download data and build indices
+```bash
+bash reproduce/get_files_build_index.sh
+```
+This downloads the news dataset, preprocesses it, and builds FAISS indices for fake and reliable news.
+
+---
+
+### 🚀 Running Experiments
+
+The evaluation pipeline requires two terminals running simultaneously.
+
+#### Terminal A: LLM Server
+```bash
+conda activate $STORAGE_DIR/llama-cuda
+bash reproduce/run_llm.sh
+```
+
+#### Terminal B: Run Experiments
+```bash
+conda activate $STORAGE_DIR/rag2
+bash reproduce/run_experiments.sh
+```
+
+**After Terminal B finishes:**
+
+1. **In Terminal A**: Kill the current script (Ctrl+C) and restart with 8B model:
+   ```bash
+   bash reproduce/run_llm.sh 8B
+   ```
+
+2. **In Terminal B**: Run reasoning support evaluation:
+   ```bash
+   python reproduce/run_reasoning_support_eval.py
+   ```
+
+3. **In Terminal B**: Run main evaluations:
+   ```bash
+   python reproduce/run_evaluations.py
+   ```
+
+4. **In Terminal B**: Generate visualizations:
+   ```bash
+   python reproduce/visualize_metrics.py
+   ```
+
+---
+
+### 📊 Results
+
+- **JSON results**: `$STORAGE_DIR/metrics_reason_support/`
+- **Graphs/visualizations**: `$STORAGE_DIR/visualized/`
+
+---
+
+### 🧭 Running the Streamlit App
 
 From the project root:
 
-```
-python -m streamlit run app.py
+```bash
+python -m streamlit run app.py --server.port 8888
 ```
 
 #### 🧠 UI Workflow
 
-Paste an article title and content
+1. Paste an article title and content
+2. Click "⚖️ Analyze"
+3. Watch dynamic stage updates:
+   - Loading FAISS → Retrieving evidence → Generating summaries → Classifying article
+4. View printed console output and final classification
+5. ✅ RELIABLE or 🚩 FAKE NEWS DETECTED
 
-Click “⚖️ Analyze”
+---
 
-Watch dynamic stage updates:
-Loading FAISS → Retrieving evidence → Generating summaries → Classifying article
+### 📦 Dependencies
 
-View printed console output and final classification
+**Note:** All dependencies are automatically downloaded and installed when running `reproduce/create_conda_envs.sh` and `reproduce/download_llms.sh`. Manual installation is not required.
 
-✅ RELIABLE or 🚩 FAKE NEWS DETECTED
+#### Conda Environments
+
+The setup creates two conda environments:
+
+**1. llama-cuda Environment** (`$STORAGE_DIR/llama-cuda`)
+- Python 3.11
+- **Conda packages:**
+  - `cuda-nvcc=11.8.89` (NVCC compiler)
+  - `cuda-toolkit=11.8.0` (CUDA toolkit)
+  - `cmake`, `ninja`, `git` (build tools)
+- **Python packages** (from `requirements/llama_cuda_requirements.txt`):
+  - `llama-cpp-python==0.3.16` (built with CUDA support)
+  - `fastapi==0.118.0`
+  - `uvicorn==0.37.0`
+  - `pydantic==2.11.10`
+  - And other dependencies for LLM server
+
+**2. rag2 Environment** (`$STORAGE_DIR/rag2`)
+- Python 3.10
+- **Conda packages:**
+  - `cudatoolkit=11.8`
+  - `faiss-gpu=1.7.2`
+- **Python packages** (from `requirements/rag2_requirements.txt`):
+  - `torch==2.1.2+cu121` (PyTorch with CUDA 12.1)
+  - `torchvision==0.16.2+cu121`
+  - `torchaudio==2.1.2+cu121`
+  - `sentence-transformers==2.6.1`
+  - `transformers==4.43.3`
+  - `streamlit==1.51.0`
+  - `scikit-learn==1.7.2`
+  - `pandas==2.3.3`
+  - `numpy<2`
+  - And other dependencies for RAG pipeline
+
+#### LLM Models
+
+Downloaded via `reproduce/download_llms.sh` (requires `HF_TOKEN`):
+- `Llama-3.2-3B-Instruct-Q4_K_M.gguf`
+- `Llama-3.2-8B-Instruct-Q4_K_M.gguf`
+
+Location: `$STORAGE_DIR/models/`
+
+#### Embedding & Reranking Models
+
+These models are automatically downloaded on first use:
+
+- **Sentence Transformer** (for embeddings):
+  - `sentence-transformers/all-MiniLM-L6-v2`
+  - Used for building FAISS indices and retrieval
+
+- **Cross-Encoder** (for reranking):
+  - `cross-encoder/ms-marco-MiniLM-L-6-v2`
+  - Used for reranking retrieved evidence
+
+#### Tokenizer
+
+- **tiktoken** with encoding `cl100k_base`
+  - Used for text chunking and tokenization
+  - Automatically downloaded via `tiktoken` package
+
+---
+
+### ⚠️ Disclaimer
+
+This project is for **educational and research purposes only**. The fake news detection system provided here is not intended for production use or real-world fact-checking applications. Results should not be considered definitive or used as the sole basis for determining the veracity of news articles. Always verify information through multiple reliable sources and consult professional fact-checking organizations.

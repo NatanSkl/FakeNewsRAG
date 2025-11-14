@@ -83,6 +83,8 @@ Edit `params.env` to set `STORAGE_DIR` to your desired directory for all downloa
 ```bash
 STORAGE_DIR=/path/to/your/storage
 ```
+Note: The entire STORAGE_DIR takes about 70GB out of 100GB in /StudentData on our VM.
+For a clean install, make sure to delete it beforehand.
 
 #### 3️⃣ Create conda environments
 ```bash

@@ -90,6 +90,8 @@ For a clean install, make sure to delete it beforehand.
 ```bash
 bash reproduce/create_conda_envs.sh
 ```
+**Expected time: ~20 minutes**
+
 This creates two conda environments:
 - `$STORAGE_DIR/llama-cuda` - for running LLM servers
 - `$STORAGE_DIR/rag2` - for running experiments and evaluations
@@ -105,6 +107,8 @@ bash reproduce/download_llms.sh
 ```bash
 bash reproduce/get_files_build_index.sh
 ```
+**Expected time: ~2.5 hours**
+
 This downloads the news dataset, preprocesses it, and builds FAISS indices for fake and reliable news.
 
 ---
@@ -124,6 +128,7 @@ bash reproduce/run_llm.sh
 conda activate $STORAGE_DIR/rag2
 bash reproduce/run_experiments.sh
 ```
+**Expected time: ~20 hours**
 
 **After Terminal B finishes:**
 
@@ -136,6 +141,7 @@ bash reproduce/run_experiments.sh
    ```bash
    python reproduce/run_reasoning_support_eval.py
    ```
+   **Expected time: ~1 hour**
 
 3. **In Terminal B**: Run main evaluations:
    ```bash
